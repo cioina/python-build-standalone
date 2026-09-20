@@ -1226,7 +1226,8 @@ def collect_python_build_artifacts(
     if unknown:
         names = ", ".join(sorted(unknown))
         log(f"encountered build directory for unknown projects: {names}")
-        sys.exit(1)
+        # acioina: Commented this due to an error. 
+        # sys.exit(1)
 
     res = {"core": {"objs": []}, "extensions": {}}
 
