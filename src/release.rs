@@ -1,0 +1,896 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+use anyhow::{Context, ensure};
+use futures::StreamExt;
+use serde::Deserialize;
+use sha2::{Digest, Sha256};
+use tokio::io::AsyncWriteExt;
+
+use object::FileKind;
+use std::{
+    process::{Command, Stdio},
+    str::FromStr,
+};
+use url::Url;
+use {
+    crate::json::parse_python_json,
+    anyhow::{Result, anyhow},
+    once_cell::sync::Lazy,
+    pep440_rs::VersionSpecifier,
+    std::{
+        collections::{BTreeMap, BTreeSet},
+        io::{BufRead, Read, Seek, Write},
+        path::{Path, PathBuf},
+    },
+};
+
+/// Describes a release for a given target triple.
+pub struct TripleRelease {
+    /// Build suffixes to release.
+    pub suffixes: Vec<&'static str>,
+    /// Build suffix to use for the `install_only` artifact.
+    pub install_only_suffix: &'static str,
+    /// Build suffix to use for the freethreaded `install_only` artifact.
+    pub freethreaded_install_only_suffix: &'static str,
+    /// Minimum Python version this triple is released for.
+    pub python_version_requirement: Option<VersionSpecifier>,
+    /// Additional build suffixes to release conditional on the Python version.
+    pub conditional_suffixes: Vec<ConditionalSuffixes>,
+}
+
+/// Describes additional build suffixes conditional on the Python version.
+///
+/// e.g., free-threaded builds which are only available for Python 3.13+.
+pub struct ConditionalSuffixes {
+    /// The minimum Python version to include these suffixes for.
+    pub python_version_requirement: VersionSpecifier,
+    /// Build suffixes to release.
+    pub suffixes: Vec<&'static str>,
+}
+
+impl TripleRelease {
+    pub fn suffixes<'a>(
+        &'a self,
+        python_version: Option<&'a pep440_rs::Version>,
+    ) -> impl Iterator<Item = &'static str> + 'a {
+        self.suffixes
+            .iter()
+            .copied()
+            .chain(
+                self.conditional_suffixes
+                    .iter()
+                    .flat_map(move |conditional| {
+                        if python_version.is_none()
+                            || python_version.is_some_and(|python_version| {
+                                conditional
+                                    .python_version_requirement
+                                    .contains(python_version)
+                            })
+                        {
+                            conditional.suffixes.iter().copied()
+                        } else {
+                            [].iter().copied()
+                        }
+                    }),
+            )
+    }
+}
+
+pub static RELEASE_TRIPLES: Lazy<BTreeMap<&'static str, TripleRelease>> = Lazy::new(|| {
+    let mut h = BTreeMap::new();
+
+    // macOS.
+    let macos_suffixes = vec!["debug", "pgo+lto"];
+    let macos_suffixes_313 = vec!["freethreaded+debug", "freethreaded+pgo+lto"];
+    h.insert(
+        "aarch64-apple-darwin",
+        TripleRelease {
+            suffixes: macos_suffixes.clone(),
+            install_only_suffix: "pgo+lto",
+            freethreaded_install_only_suffix: "freethreaded+pgo+lto",
+            python_version_requirement: None,
+            conditional_suffixes: vec![ConditionalSuffixes {
+                python_version_requirement: VersionSpecifier::from_str(">=3.13.0rc0").unwrap(),
+                suffixes: macos_suffixes_313.clone(),
+            }],
+        },
+    );
+    h.insert(
+        "x86_64-apple-darwin",
+        TripleRelease {
+            suffixes: macos_suffixes,
+            install_only_suffix: "pgo+lto",
+            freethreaded_install_only_suffix: "freethreaded+pgo+lto",
+            python_version_requirement: None,
+            conditional_suffixes: vec![ConditionalSuffixes {
+                python_version_requirement: VersionSpecifier::from_str(">=3.13.0rc0").unwrap(),
+                suffixes: macos_suffixes_313.clone(),
+            }],
+        },
+    );
+
+    // Windows.
+    h.insert(
+        "i686-pc-windows-msvc",
+        TripleRelease {
+            suffixes: vec!["pgo"],
+            install_only_suffix: "pgo",
+            freethreaded_install_only_suffix: "freethreaded+pgo",
+            python_version_requirement: None,
+            conditional_suffixes: vec![ConditionalSuffixes {
+                python_version_requirement: VersionSpecifier::from_str(">=3.13").unwrap(),
+                suffixes: vec!["freethreaded+pgo"],
+            }],
+        },
+    );
+    h.insert(
+        "x86_64-pc-windows-msvc",
+        TripleRelease {
+            suffixes: vec!["pgo"],
+            install_only_suffix: "pgo",
+            freethreaded_install_only_suffix: "freethreaded+pgo",
+            python_version_requirement: None,
+            conditional_suffixes: vec![ConditionalSuffixes {
+                python_version_requirement: VersionSpecifier::from_str(">=3.13").unwrap(),
+                suffixes: vec!["freethreaded+pgo"],
+            }],
+        },
+    );
+    h.insert(
+        "aarch64-pc-windows-msvc",
+        TripleRelease {
+            suffixes: vec!["pgo"],
+            install_only_suffix: "pgo",
+            freethreaded_install_only_suffix: "freethreaded+pgo",
+            python_version_requirement: Some(VersionSpecifier::from_str(">=3.11").unwrap()),
+            conditional_suffixes: vec![ConditionalSuffixes {
+                python_version_requirement: VersionSpecifier::from_str(">=3.13").unwrap(),
+                suffixes: vec!["freethreaded+pgo"],
+            }],
+        },
+    );
+
+    // Linux.
+    let linux_suffixes_pgo = vec!["debug", "pgo+lto"];
+    let linux_suffixes_nopgo = vec!["debug", "lto", "noopt"];
+    let linux_suffixes_musl = vec![
+        "debug",
+        "lto",
+        "noopt",
+        "debug+static",
+        "lto+static",
+        "noopt+static",
+    ];
+    let linux_suffixes_musl_freethreaded = vec![
+        "freethreaded+debug",
+        "freethreaded+lto",
+        "freethreaded+noopt",
+    ];
+    let linux_suffixes_pgo_freethreaded = vec!["freethreaded+debug", "freethreaded+pgo+lto"];
+    let linux_suffixes_nopgo_freethreaded = vec![
+        "freethreaded+debug",
+        "freethreaded+lto",
+        "freethreaded+noopt",
+    ];
+
+    h.insert(
+        "aarch64-unknown-linux-gnu",
+        TripleRelease {
+            suffixes: linux_suffixes_pgo.clone(),
+            install_only_suffix: "pgo+lto",
+            freethreaded_install_only_suffix: "freethreaded+pgo+lto",
+            python_version_requirement: None,
+            conditional_suffixes: vec![ConditionalSuffixes {
+                python_version_requirement: VersionSpecifier::from_str(">=3.13").unwrap(),
+                suffixes: linux_suffixes_pgo_freethreaded.clone(),
+            }],
+        },
+    );
+
+    h.insert(
+        "ppc64le-unknown-linux-gnu",
+        TripleRelease {
+            suffixes: linux_suffixes_nopgo.clone(),
+            install_only_suffix: "lto",
+            freethreaded_install_only_suffix: "freethreaded+lto",
+            python_version_requirement: Some(VersionSpecifier::from_str(">=3.10").unwrap()),
+            conditional_suffixes: vec![ConditionalSuffixes {
+                python_version_requirement: VersionSpecifier::from_str(">=3.13").unwrap(),
+                suffixes: linux_suffixes_nopgo_freethreaded.clone(),
+            }],
+        },
+    );
+
+    h.insert(
+        "riscv64-unknown-linux-gnu",
+        TripleRelease {
+            suffixes: linux_suffixes_nopgo.clone(),
+            install_only_suffix: "lto",
+            freethreaded_install_only_suffix: "freethreaded+lto",
+            python_version_requirement: Some(VersionSpecifier::from_str(">=3.10").unwrap()),
+            conditional_suffixes: vec![ConditionalSuffixes {
+                python_version_requirement: VersionSpecifier::from_str(">=3.13").unwrap(),
+                suffixes: linux_suffixes_nopgo_freethreaded.clone(),
+            }],
+        },
+    );
+
+    h.insert(
+        "s390x-unknown-linux-gnu",
+        TripleRelease {
+            suffixes: linux_suffixes_nopgo.clone(),
+            install_only_suffix: "lto",
+            freethreaded_install_only_suffix: "freethreaded+lto",
+            python_version_requirement: Some(VersionSpecifier::from_str(">=3.10").unwrap()),
+            conditional_suffixes: vec![ConditionalSuffixes {
+                python_version_requirement: VersionSpecifier::from_str(">=3.13").unwrap(),
+                suffixes: linux_suffixes_nopgo_freethreaded.clone(),
+            }],
+        },
+    );
+
+    h.insert(
+        "armv7-unknown-linux-gnueabi",
+        TripleRelease {
+            suffixes: linux_suffixes_nopgo.clone(),
+            install_only_suffix: "lto",
+            freethreaded_install_only_suffix: "freethreaded+lto",
+            python_version_requirement: Some(VersionSpecifier::from_str(">=3.10").unwrap()),
+            conditional_suffixes: vec![ConditionalSuffixes {
+                python_version_requirement: VersionSpecifier::from_str(">=3.13").unwrap(),
+                suffixes: linux_suffixes_nopgo_freethreaded.clone(),
+            }],
+        },
+    );
+
+    h.insert(
+        "armv7-unknown-linux-gnueabihf",
+        TripleRelease {
+            suffixes: linux_suffixes_nopgo.clone(),
+            install_only_suffix: "lto",
+            freethreaded_install_only_suffix: "freethreaded+lto",
+            python_version_requirement: Some(VersionSpecifier::from_str(">=3.10").unwrap()),
+            conditional_suffixes: vec![ConditionalSuffixes {
+                python_version_requirement: VersionSpecifier::from_str(">=3.13").unwrap(),
+                suffixes: linux_suffixes_nopgo_freethreaded.clone(),
+            }],
+        },
+    );
+
+    h.insert(
+        "x86_64-unknown-linux-gnu",
+        TripleRelease {
+            suffixes: linux_suffixes_pgo.clone(),
+            install_only_suffix: "pgo+lto",
+            freethreaded_install_only_suffix: "freethreaded+pgo+lto",
+            python_version_requirement: None,
+            conditional_suffixes: vec![ConditionalSuffixes {
+                python_version_requirement: VersionSpecifier::from_str(">=3.13").unwrap(),
+                suffixes: linux_suffixes_pgo_freethreaded.clone(),
+            }],
+        },
+    );
+    h.insert(
+        "x86_64_v2-unknown-linux-gnu",
+        TripleRelease {
+            suffixes: linux_suffixes_pgo.clone(),
+            install_only_suffix: "pgo+lto",
+            freethreaded_install_only_suffix: "freethreaded+pgo+lto",
+            python_version_requirement: Some(VersionSpecifier::from_str(">=3.10").unwrap()),
+            conditional_suffixes: vec![ConditionalSuffixes {
+                python_version_requirement: VersionSpecifier::from_str(">=3.13").unwrap(),
+                suffixes: linux_suffixes_pgo_freethreaded.clone(),
+            }],
+        },
+    );
+    h.insert(
+        "x86_64_v3-unknown-linux-gnu",
+        TripleRelease {
+            suffixes: linux_suffixes_pgo.clone(),
+            install_only_suffix: "pgo+lto",
+            freethreaded_install_only_suffix: "freethreaded+pgo+lto",
+            python_version_requirement: Some(VersionSpecifier::from_str(">=3.10").unwrap()),
+            conditional_suffixes: vec![ConditionalSuffixes {
+                python_version_requirement: VersionSpecifier::from_str(">=3.13").unwrap(),
+                suffixes: linux_suffixes_pgo_freethreaded.clone(),
+            }],
+        },
+    );
+    h.insert(
+        "x86_64_v4-unknown-linux-gnu",
+        TripleRelease {
+            suffixes: linux_suffixes_pgo.clone(),
+            install_only_suffix: "pgo+lto",
+            freethreaded_install_only_suffix: "freethreaded+pgo+lto",
+            python_version_requirement: Some(VersionSpecifier::from_str(">=3.10").unwrap()),
+            conditional_suffixes: vec![ConditionalSuffixes {
+                python_version_requirement: VersionSpecifier::from_str(">=3.13").unwrap(),
+                suffixes: linux_suffixes_pgo_freethreaded.clone(),
+            }],
+        },
+    );
+    h.insert(
+        "x86_64-unknown-linux-musl",
+        TripleRelease {
+            suffixes: linux_suffixes_musl.clone(),
+            install_only_suffix: "lto",
+            freethreaded_install_only_suffix: "freethreaded+lto",
+            python_version_requirement: None,
+            conditional_suffixes: vec![ConditionalSuffixes {
+                python_version_requirement: VersionSpecifier::from_str(">=3.13").unwrap(),
+                suffixes: linux_suffixes_musl_freethreaded.clone(),
+            }],
+        },
+    );
+    h.insert(
+        "x86_64_v2-unknown-linux-musl",
+        TripleRelease {
+            suffixes: linux_suffixes_musl.clone(),
+            install_only_suffix: "lto",
+            freethreaded_install_only_suffix: "freethreaded+lto",
+            python_version_requirement: None,
+            conditional_suffixes: vec![ConditionalSuffixes {
+                python_version_requirement: VersionSpecifier::from_str(">=3.13").unwrap(),
+                suffixes: linux_suffixes_musl_freethreaded.clone(),
+            }],
+        },
+    );
+    h.insert(
+        "x86_64_v3-unknown-linux-musl",
+        TripleRelease {
+            suffixes: linux_suffixes_musl.clone(),
+            install_only_suffix: "lto",
+            freethreaded_install_only_suffix: "freethreaded+lto",
+            python_version_requirement: None,
+            conditional_suffixes: vec![ConditionalSuffixes {
+                python_version_requirement: VersionSpecifier::from_str(">=3.13").unwrap(),
+                suffixes: linux_suffixes_musl_freethreaded.clone(),
+            }],
+        },
+    );
+    h.insert(
+        "x86_64_v4-unknown-linux-musl",
+        TripleRelease {
+            suffixes: linux_suffixes_musl.clone(),
+            install_only_suffix: "lto",
+            freethreaded_install_only_suffix: "freethreaded+lto",
+            python_version_requirement: None,
+            conditional_suffixes: vec![ConditionalSuffixes {
+                python_version_requirement: VersionSpecifier::from_str(">=3.13").unwrap(),
+                suffixes: linux_suffixes_musl_freethreaded.clone(),
+            }],
+        },
+    );
+    h.insert(
+        "aarch64-unknown-linux-musl",
+        TripleRelease {
+            suffixes: linux_suffixes_musl.clone(),
+            install_only_suffix: "lto",
+            freethreaded_install_only_suffix: "freethreaded+lto",
+            python_version_requirement: None,
+            conditional_suffixes: vec![ConditionalSuffixes {
+                python_version_requirement: VersionSpecifier::from_str(">=3.13").unwrap(),
+                suffixes: linux_suffixes_musl_freethreaded.clone(),
+            }],
+        },
+    );
+
+    h
+});
+
+/// Build a mapping from local artifact filenames (as found in the dist directory after
+/// `fetch-release-distributions`) to their corresponding GitHub Release asset names.
+///
+/// Both the source and destination names are derived from the same set of build artifacts;
+/// the difference is that GitHub Release names embed the release tag and use a normalised
+/// suffix (`-full`, no datetime component), while the local artifact names embed the build
+/// datetime and no tag.
+///
+/// Example:
+/// * source: `cpython-3.12.4-x86_64-unknown-linux-gnu-pgo+lto-20240722T0909.tar.zst`
+/// * dest:   `cpython-3.12.4+20240722-x86_64-unknown-linux-gnu-pgo+lto-full.tar.zst`
+pub fn build_wanted_filenames(
+    // `filenames` must already be filtered to entries that contain `datetime` and start with `cpython-`.
+    filenames: &BTreeSet<String>,
+    datetime: &str,
+    tag: &str,
+) -> Result<BTreeMap<String, String>> {
+    let mut python_versions = BTreeSet::new();
+    for filename in filenames {
+        let parts = filename.split('-').collect::<Vec<_>>();
+        python_versions.insert(parts[1].to_string());
+    }
+
+    let mut wanted_filenames = BTreeMap::new();
+    for version in &python_versions {
+        for (triple, release) in RELEASE_TRIPLES.iter() {
+            let python_version = pep440_rs::Version::from_str(version)?;
+            if let Some(req) = &release.python_version_requirement {
+                if !req.contains(&python_version) {
+                    continue;
+                }
+            }
+
+            for suffix in release.suffixes(Some(&python_version)) {
+                wanted_filenames.insert(
+                    format!("cpython-{version}-{triple}-{suffix}-{datetime}.tar.zst"),
+                    format!("cpython-{version}+{tag}-{triple}-{suffix}-full.tar.zst"),
+                );
+            }
+
+            wanted_filenames.insert(
+                format!("cpython-{version}-{triple}-install_only-{datetime}.tar.gz"),
+                format!("cpython-{version}+{tag}-{triple}-install_only.tar.gz"),
+            );
+
+            wanted_filenames.insert(
+                format!("cpython-{version}-{triple}-install_only_stripped-{datetime}.tar.gz"),
+                format!("cpython-{version}+{tag}-{triple}-install_only_stripped.tar.gz"),
+            );
+
+            // Free-threading only available for Python 3.13+
+            let freethreaded_conditional = VersionSpecifier::from_str(">=3.13.0rc0").unwrap();
+            if freethreaded_conditional.contains(&python_version) {
+                wanted_filenames.insert(
+                    format!(
+                        "cpython-{version}-{triple}-freethreaded-install_only-{datetime}.tar.gz"
+                    ),
+                    format!("cpython-{version}+{tag}-{triple}-freethreaded-install_only.tar.gz"),
+                );
+
+                wanted_filenames.insert(
+                    format!("cpython-{version}-{triple}-freethreaded-install_only_stripped-{datetime}.tar.gz"),
+                    format!("cpython-{version}+{tag}-{triple}-freethreaded-install_only_stripped.tar.gz"),
+                );
+            }
+        }
+    }
+
+    Ok(wanted_filenames)
+}
+
+/// Extension modules that should not be included in "install only" archives.
+const INSTALL_ONLY_DROP_EXTENSIONS: &[&str] = &[
+    "_ctypes_test",
+    "_testbuffer",
+    "_testcapi",
+    "_testexternalinspection",
+    "_testimportmultiple",
+    "_testinternalcapi",
+    "_testlimitedcapi",
+    "_testmultiphase",
+    "_testsinglephase",
+];
+
+/// Convert a .tar.zst archive to an install-only .tar.gz archive.
+pub fn convert_to_install_only<W: Write>(reader: impl BufRead, writer: W) -> Result<W> {
+    let dctx = zstd::stream::Decoder::new(reader)?;
+
+    let mut tar_in = tar::Archive::new(dctx);
+
+    let writer = flate2::write::GzEncoder::new(writer, flate2::Compression::default());
+
+    let mut builder = tar::Builder::new(writer);
+
+    let mut entries = tar_in.entries()?;
+
+    // First entry in archive should be python/PYTHON.json.
+    let mut entry = entries.next().expect("tar must have content")?;
+    if entry.path_bytes().as_ref() != b"python/PYTHON.json" {
+        return Err(anyhow!("first archive entry not PYTHON.json"));
+    }
+
+    let mut json_data = vec![];
+    entry.read_to_end(&mut json_data)?;
+
+    let json_main = parse_python_json(&json_data).context("failed to parse PYTHON.json")?;
+
+    let stdlib_path = json_main
+        .python_paths
+        .get("stdlib")
+        .expect("stdlib entry expected");
+
+    let mut drop_paths = BTreeSet::new();
+
+    for (extension, info) in &json_main.build_info.extensions {
+        if !INSTALL_ONLY_DROP_EXTENSIONS.contains(&extension.as_str()) {
+            continue;
+        }
+
+        for entry in info {
+            if let Some(rel_path) = entry.shared_lib.as_ref() {
+                let full_path = format!("python/{}", rel_path);
+                drop_paths.insert(full_path.into_bytes());
+            }
+        }
+    }
+
+    for entry in entries {
+        let mut entry = entry?;
+
+        let path_bytes = entry.path_bytes();
+
+        if !path_bytes.starts_with(b"python/install/") {
+            continue;
+        }
+
+        // Strip the libpython static library, as it significantly
+        // increases the size of the archive and isn't needed in most cases.
+        if path_bytes
+            .windows(b"/libpython".len())
+            .any(|x| x == b"/libpython")
+            && path_bytes.ends_with(b".a")
+        {
+            continue;
+        }
+
+        // Strip standard library test modules, as they aren't needed in regular
+        // installs. We do this based on the metadata in PYTHON.json for
+        // consistency.
+        if json_main
+            .python_stdlib_test_packages
+            .iter()
+            .any(|test_package| {
+                let package_path =
+                    format!("python/{}/{}/", stdlib_path, test_package.replace('.', "/"));
+
+                path_bytes.starts_with(package_path.as_bytes())
+            })
+        {
+            continue;
+        }
+
+        if drop_paths.contains(&path_bytes.to_vec()) {
+            continue;
+        }
+
+        let mut data = vec![];
+        entry.read_to_end(&mut data)?;
+
+        let path = entry.path()?;
+        let new_path = PathBuf::from("python").join(path.strip_prefix("python/install/")?);
+
+        let mut header = entry.header().clone();
+        header.set_path(&new_path)?;
+        header.set_cksum();
+
+        builder.append(&header, std::io::Cursor::new(data))?;
+    }
+
+    Ok(builder.into_inner()?.finish()?)
+}
+
+/// Run `llvm-strip` over the given data, returning the stripped data.
+fn llvm_strip(data: &[u8], llvm_dir: &Path) -> Result<Vec<u8>> {
+    let mut command = Command::new(llvm_dir.join("bin/llvm-strip"))
+        .arg("--strip-debug")
+        .arg("-")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .with_context(|| "failed to spawn llvm-strip")?;
+
+    command
+        .stdin
+        .as_mut()
+        .unwrap()
+        .write_all(data)
+        .with_context(|| "failed to write data to llvm-strip")?;
+
+    let output = command
+        .wait_with_output()
+        .with_context(|| "failed to wait for llvm-strip")?;
+    if !output.status.success() {
+        return Err(anyhow!("llvm-strip failed: {}", output.status));
+    }
+
+    Ok(output.stdout)
+}
+
+/// Given an install-only .tar.gz archive, strip the underlying build.
+pub fn convert_to_stripped<W: Write>(
+    reader: impl BufRead,
+    writer: W,
+    llvm_dir: &Path,
+) -> Result<W> {
+    let dctx = flate2::read::GzDecoder::new(reader);
+
+    let mut tar_in = tar::Archive::new(dctx);
+
+    let writer = flate2::write::GzEncoder::new(writer, flate2::Compression::default());
+
+    let mut builder = tar::Builder::new(writer);
+
+    for entry in tar_in.entries()? {
+        let mut entry = entry?;
+
+        let mut data = vec![];
+        entry.read_to_end(&mut data)?;
+
+        let path = entry.path()?;
+
+        // Drop PDB files.
+        match pdb::PDB::open(std::io::Cursor::new(&data)) {
+            Ok(_) => {
+                continue;
+            }
+            Err(err) => {
+                if path.extension().is_some_and(|ext| ext == "pdb") {
+                    println!(
+                        "file with `.pdb` extension ({}) failed to parse as PDB :{err}",
+                        path.display()
+                    );
+                }
+            }
+        }
+
+        // If we have an ELF, Mach-O, or PE file, strip it in-memory with `llvm-strip`, and
+        // return the stripped data.
+        if matches!(
+            FileKind::parse(data.as_slice()),
+            Ok(FileKind::Elf32
+                | FileKind::Elf64
+                | FileKind::MachO32
+                | FileKind::MachO64
+                | FileKind::MachOFat32
+                | FileKind::MachOFat64
+                | FileKind::Pe32
+                | FileKind::Pe64)
+        ) {
+            // Skip stripping MSVC runtime DLLs and Tcl/Tk DLLs containing ZIPFS data or
+            // valid signatures.
+            // Tcl 9 DLLs contain ZIPFS data. The other DLLs are signed by Microsoft or by the
+            // Tcl maintainers. `llvm-strip` removes the signature but keeps
+            // the certificate table entry in the PE header.
+            // This makes the binaries impossible to re-sign with `signtool`, which in turn
+            // means that they can never be bundled into a Microsoft Store-compatible .msix.
+            let filename = path.file_name().and_then(|n| n.to_str());
+            if !matches!(
+                filename,
+                Some(
+                    "tcl86t.dll"
+                        | "tcl90.dll"
+                        | "tcl9tk90.dll"
+                        | "tcldde14.dll"
+                        | "tclreg13.dll"
+                        | "tk86t.dll"
+                        | "vcruntime140.dll"
+                        | "vcruntime140_1.dll"
+                        | "vcruntime140_threads.dll"
+                )
+            ) {
+                data = llvm_strip(&data, llvm_dir)
+                    .with_context(|| format!("failed to strip {}", path.display()))?;
+            }
+        }
+
+        let mut header = entry.header().clone();
+        header.set_size(data.len() as u64);
+        header.set_cksum();
+
+        builder.append(&header, std::io::Cursor::new(data))?;
+    }
+
+    Ok(builder.into_inner()?.finish()?)
+}
+
+/// Create an install-only .tar.gz archive from a .tar.zst archive.
+pub fn produce_install_only(tar_zst_path: &Path) -> Result<PathBuf> {
+    let buf = std::fs::read(tar_zst_path)?;
+
+    let gz_data = convert_to_install_only(std::io::Cursor::new(buf), std::io::Cursor::new(vec![]))
+        .context(format!(
+            "failed to convert `{}` to install_only",
+            tar_zst_path.display()
+        ))?
+        .into_inner();
+
+    let filename = tar_zst_path
+        .file_name()
+        .expect("should have filename")
+        .to_string_lossy();
+
+    let mut name_parts = filename
+        .split('-')
+        .map(|x| x.to_string())
+        .collect::<Vec<_>>();
+    let parts_len = name_parts.len();
+    let flavor_idx = parts_len - 2;
+
+    if name_parts[flavor_idx].contains("freethreaded") {
+        name_parts
+            .splice(
+                flavor_idx..flavor_idx + 1,
+                ["freethreaded".to_string(), "install_only".to_string()],
+            )
+            .for_each(drop);
+    } else {
+        name_parts[flavor_idx] = "install_only".to_string();
+    }
+
+    let install_only_name = name_parts.join("-");
+    let install_only_name = install_only_name.replace(".tar.zst", ".tar.gz");
+
+    let dest_path = tar_zst_path.with_file_name(install_only_name);
+    std::fs::write(&dest_path, gz_data)?;
+
+    Ok(dest_path)
+}
+
+pub fn produce_install_only_stripped(tar_gz_path: &Path, llvm_dir: &Path) -> Result<PathBuf> {
+    let buf = std::fs::read(tar_gz_path)?;
+
+    let size_before = buf.len();
+
+    let gz_data = convert_to_stripped(
+        std::io::Cursor::new(buf),
+        std::io::Cursor::new(vec![]),
+        llvm_dir,
+    )
+    .context(format!(
+        "failed to convert `{}` to install_only_stripped",
+        tar_gz_path.display()
+    ))?
+    .into_inner();
+
+    let size_after = gz_data.len();
+
+    println!(
+        "stripped {} from {size_before} to {size_after} bytes",
+        tar_gz_path.display()
+    );
+
+    // Given `cpython-3.12.4-x86_64_v3-unknown-linux-gnu-install_only-20240722T0909.tar.gz`,
+    // map to `cpython-3.12.4-x86_64_v3-unknown-linux-gnu-install_only_stripped-20240722T0909.tar.gz`.
+    let filename = tar_gz_path
+        .file_name()
+        .expect("should have filename")
+        .to_string_lossy();
+
+    let mut name_parts = filename
+        .split('-')
+        .map(|x| x.to_string())
+        .collect::<Vec<_>>();
+    let parts_len = name_parts.len();
+
+    name_parts[parts_len - 2] = "install_only_stripped".to_string();
+
+    let install_only_name = name_parts.join("-");
+
+    let dest_path = tar_gz_path.with_file_name(install_only_name);
+    std::fs::write(&dest_path, gz_data)?;
+
+    Ok(dest_path)
+}
+
+#[derive(Deserialize)]
+struct Download {
+    url: String,
+    size: u64,
+    sha256: String,
+}
+
+/// The same pinned archives used by `pythonbuild/downloads.py`.
+static DOWNLOADS: Lazy<BTreeMap<String, Download>> = Lazy::new(|| {
+    serde_json::from_str(include_str!("../pythonbuild/downloads.json"))
+        .expect("invalid download metadata")
+});
+
+fn llvm_download(os: &str, arch: &str) -> Result<&'static Download> {
+    DOWNLOADS
+        .get(&format!("llvm-{arch}-{os}"))
+        .with_context(|| format!("unsupported LLVM bootstrap platform: {os}-{arch}"))
+}
+
+/// Verify the compressed archive before it reaches the decompressor.
+fn verify_llvm_archive(mut file: std::fs::File, download: &Download) -> Result<std::fs::File> {
+    let size = file.metadata()?.len();
+    ensure!(
+        size == download.size,
+        "LLVM archive size mismatch: expected {}, got {size}",
+        download.size
+    );
+
+    let mut hasher = Sha256::new();
+    std::io::copy(&mut file, &mut hasher)?;
+    let sha256 = hex::encode(hasher.finalize());
+    ensure!(
+        sha256 == download.sha256,
+        "LLVM archive SHA-256 mismatch: expected {}, got {sha256}",
+        download.sha256
+    );
+    file.rewind()?;
+    Ok(file)
+}
+
+/// Bootstrap `llvm` for the current platform.
+///
+/// Returns the path to the top-level `llvm` directory.
+pub async fn bootstrap_llvm() -> Result<PathBuf> {
+    let download = llvm_download(std::env::consts::OS, std::env::consts::ARCH)?;
+    let url = Url::parse(&download.url)?;
+    let filename = url
+        .path_segments()
+        .and_then(|mut segments| segments.next_back())
+        .filter(|name| !name.is_empty())
+        .context("LLVM URL has no filename")?;
+    let llvm_dir = Path::new("build").join("llvm");
+    std::fs::create_dir_all(&llvm_dir)?;
+
+    // Always verify cached bytes. The marker ties the extracted tree to a
+    // successful verified extraction, so older, unverified caches are rebuilt.
+    // The local workspace (including the marker and extracted tree) is trusted.
+    let cached_tarball = match std::fs::File::open(llvm_dir.join(filename)) {
+        Ok(file) => {
+            let file = verify_llvm_archive(file, download).with_context(|| {
+                format!(
+                    "cached LLVM archive failed verification; remove {} and retry",
+                    llvm_dir.display()
+                )
+            })?;
+            if std::fs::read_to_string(llvm_dir.join(".verified-sha256"))
+                .ok()
+                .as_deref()
+                == Some(download.sha256.as_str())
+            {
+                return Ok(llvm_dir.join("llvm"));
+            }
+            Some(file)
+        }
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+        Err(err) => return Err(err).context("failed to open cached LLVM archive"),
+    };
+
+    // Stage on the same filesystem as the cache, and publish only after both
+    // verification and extraction succeed.
+    let temp_dir = tempfile::Builder::new()
+        .prefix(".llvm-")
+        .tempdir_in(llvm_dir.parent().context("LLVM cache has no parent")?)?;
+    let tarball_path = temp_dir.path().join(filename);
+    let tarball = if let Some(mut file) = cached_tarball {
+        std::io::copy(&mut file, &mut std::fs::File::create(&tarball_path)?)?;
+        file.rewind()?;
+        file
+    } else {
+        println!("Downloading LLVM tarball from: {url}");
+        let mut bytes_stream = reqwest::Client::new()
+            .get(url.clone())
+            .send()
+            .await?
+            .error_for_status()?
+            .bytes_stream();
+        let mut tarball_file = tokio::fs::File::create(&tarball_path).await?;
+        let mut size = 0;
+        while let Some(chunk) = bytes_stream.next().await {
+            let chunk = chunk?;
+            size += chunk.len() as u64;
+            ensure!(
+                size <= download.size,
+                "LLVM archive exceeds expected size of {} bytes",
+                download.size
+            );
+            tarball_file.write_all(&chunk).await?;
+        }
+        tarball_file.flush().await?;
+        drop(tarball_file);
+        verify_llvm_archive(std::fs::File::open(&tarball_path)?, download)?
+    };
+
+    // Only verified bytes may be decompressed or extracted.
+    let tar = zstd::stream::Decoder::new(std::io::BufReader::new(tarball))?;
+    let mut archive = tar::Archive::new(tar);
+    archive.unpack(temp_dir.path())?;
+    std::fs::write(temp_dir.path().join(".verified-sha256"), &download.sha256)?;
+
+    // Persist the directory.
+    match tokio::fs::remove_dir_all(&llvm_dir).await {
+        Ok(_) => {}
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err).context("failed to remove existing llvm directory"),
+    }
+    tokio::fs::rename(temp_dir.path(), &llvm_dir).await?;
+
+    Ok(llvm_dir.join("llvm"))
+}

@@ -1,0 +1,61 @@
+# Describes the runners that the CI system can use
+
+depot-ubuntu-22.04-4:
+  arch: x86_64
+  platform: linux
+  free: false
+
+depot-ubuntu-22.04-arm-4:
+  arch: aarch64
+  platform: linux
+  free: false
+
+namespace-profile-macos-15:
+  arch: aarch64
+  platform: darwin
+  free: false
+
+ubuntu-latest:
+  arch: x86_64
+  platform: linux
+  free: true
+
+macos-latest:
+  arch: aarch64
+  platform: darwin
+  free: true
+
+depot-windows-2022-8:
+  arch: x86_64
+  platform: windows
+  free: false
+
+windows-latest-large:
+  arch: x86_64
+  platform: windows
+  free: false
+
+github-windows-2025-x86_64-8:
+  arch: x86_64
+  platform: windows
+  free: false
+
+windows-latest:
+  arch: x86_64
+  platform: windows
+  free: true
+
+windows-2025-vs2026:
+  arch: x86_64
+  platform: windows
+  free: true
+
+github-windows-11-vs2026-aarch64-8:
+  arch: aarch64
+  platform: windows
+  free: false
+
+windows-11-vs2026-arm:
+  arch: aarch64
+  platform: windows
+  free: false

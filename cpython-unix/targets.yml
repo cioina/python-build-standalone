@@ -1,0 +1,1257 @@
+# This file defines configurations for each supported build target/triple.
+#
+# host_platform
+#    Defines the platform name where this configuration can be built from.
+#
+# pythons_supported
+#    Python versions we support building.
+#
+# needs_toolchain
+#    Whether this build requires the presence of a custom compiled toolchain.
+#    If not defined, it is assumed the toolchain is present in the build
+#    environment already.
+#
+# needs
+#    Packages required to build Python.
+#
+# linux_uapi_include_arch
+#    Architecture-specific include directory in the linux-uapi package. When
+#    defined, the package's modern Linux UAPI headers are used to build Python.
+#    The linux-uapi package must also be listed in the target's needs.
+#
+# host_cc
+#    Path to C compiler to use when producing binaries targeting the
+#    current build environment.
+#
+# host_cxx
+#    Path to C++ compiler to use when producing binaries targeting the
+#    current build environment.
+#
+# target_cc
+#    Path to C compiler to use for building binaries targeting the
+#    target architecture.
+
+# target_cxx
+#    Path to C++ compiler to use for building binaries targeting the
+#    target architecture.
+#
+# target_cflags
+#    List of extra compiler flags to use when building for the target.
+#
+#    Values will be added to CPPFLAGS and CFLAGS.
+#
+# target_ldflags
+#    List of extra linker flags to use when building for the target.
+#
+#    Values will be added to LDFLAGS.
+#
+#    Linux targets pass -Wl,--build-id=sha1 so binaries carry a GNU build ID.
+#    Debuginfod is keyed entirely on that ID, so without it debuggers cannot
+#    request debug symbols for these distributions at all. sha1 is derived from
+#    the linked content, so it does not affect build reproducibility.
+#
+# apple_sdk_platform
+#    Name of the Apple SDK platform to use when building.
+#
+#    Value is fed into `xcrun --sdk` to locate the Apple SDK.
+#
+#    Required when targeting Apple.
+#
+# openssl_target
+#    Name of OpenSSL platform build target.
+#
+# bolt_capable
+#    Whether the target is capable of performing BOLT optimizations.
+
+---
+
+# Apple silicon macOS.
+#
+# We target compatibility with macOS 11.0+ because Apple silicon only supports
+# 11.0+.
+aarch64-apple-darwin:
+  host_platforms:
+    - macos_arm64
+    - macos_x86_64
+  pythons_supported:
+    - '3.10'
+    - '3.11'
+    - '3.12'
+    - '3.13'
+    - '3.14'
+    - '3.15'
+  needs_toolchain: true
+  host_cc: clang
+  host_cxx: clang++
+  target_cc: clang
+  target_cxx: clang++
+  apple_sdk_platform: macosx
+  target_cflags:
+    - '-arch'
+    - 'arm64'
+    - '-mmacosx-version-min=11.0'
+    # Suppress extremely verbose warnings we see with LLVM 10.
+    - '-Wno-nullability-completeness'
+    - '-Wno-expansion-to-defined'
+    # LLVM 11 contains commit https://reviews.llvm.org/D83250,
+    # which enables -Werror for undef-prefix=TARGET_OS_.
+    # However, the macOS SDK has headers that reference deprecated
+    # TARGET_OS defines, like TARGET_OS_EMBEDDED. So LLVM 11 refuses
+    # to work with the macOS SDKs out of the box. We work around
+    # this by undoing the -Werror=undef-prefix in that commit.
+    - '-Wno-undef-prefix'
+    - '-fvisibility=hidden'
+  target_ldflags:
+    - '-arch'
+    - 'arm64'
+    - '-mmacosx-version-min=11.0'
+  needs:
+    - autoconf
+    - bzip2
+    - expat
+    - libffi
+    - m4
+    - mpdecimal
+    - openssl-3.5
+    - pkgconf
+    - sqlite
+    - tcl
+    - tk
+    - uuid
+    - xz
+    - zstd
+  openssl_target: darwin64-arm64-cc
+
+aarch64-unknown-linux-gnu:
+  linux_uapi_include_arch: aarch64-linux-gnu
+  host_platforms:
+    - linux_x86_64
+    - linux_aarch64
+    - macos_arm64
+  pythons_supported:
+    - '3.10'
+    - '3.11'
+    - '3.12'
+    - '3.13'
+    - '3.14'
+    - '3.15'
+  docker_image_suffix: .debian13
+  needs_toolchain: true
+  host_cc: clang
+  host_cxx: clang++
+  target_cc: clang
+  target_cxx: clang++
+  target_cflags:
+    # Keep target headers and glibc independent of the modern build container.
+    - '--sysroot=/usr/aarch64-linux-gnu'
+    # Hardening
+    - '-fstack-protector'
+    - '-fstack-clash-protection'
+    - '-U_FORTIFY_SOURCE'
+    - '-D_FORTIFY_SOURCE=2'
+    - '-fvisibility=hidden'
+    # Enable frame pointers
+    - '-fno-omit-frame-pointer'
+    - '-mno-omit-leaf-frame-pointer'
+    # Needed to prevent BOLT from crashing.
+    - '-fdebug-default-version=4'
+  target_ldflags:
+    - '--sysroot=/usr/aarch64-linux-gnu'
+    # Hardening
+    - '-Wl,-z,noexecstack'
+    - '-Wl,-z,relro'
+    - '-Wl,-z,now'
+    - '-Wl,--build-id=sha1'
+  needs:
+    - autoconf
+    - bdb
+    - binutils
+    - bzip2
+    - expat
+    - libedit
+    - libffi
+    - libX11
+    - libXau
+    - libxcb
+    - linux-uapi
+    - m4
+    - mpdecimal
+    - ncurses
+    - openssl-3.5
+    - patchelf
+    - sqlite
+    - tcl
+    - tk
+    - uuid
+    - xorgproto
+    - xz
+    - zlib
+    - zstd
+  openssl_target: linux-aarch64
+  # Blocked on:
+  #   BOLT-ERROR: Cannot relax adr in non-simple function
+  #   trampoline_code_table/1. Use --strict option to override
+  # See https://github.com/llvm/llvm-project/issues/146541
+  # bolt_capable: true
+
+armv7-unknown-linux-gnueabi:
+  linux_uapi_include_arch: arm-linux-gnueabi
+  host_platforms:
+    - linux_x86_64
+  pythons_supported:
+    - '3.10'
+    - '3.11'
+    - '3.12'
+    - '3.13'
+    - '3.14'
+    - '3.15'
+  docker_image_suffix: .cross
+  host_cc: /usr/bin/x86_64-linux-gnu-gcc
+  host_cxx: /usr/bin/x86_64-linux-gnu-g++
+  target_cc: /usr/bin/arm-linux-gnueabi-gcc
+  target_cxx: /usr/bin/arm-linux-gnueabi-g++
+  target_cflags:
+    # Hardening
+    - '-fstack-protector'
+    - '-U_FORTIFY_SOURCE'
+    - '-D_FORTIFY_SOURCE=2'
+  target_ldflags:
+    # Hardening
+    - '-Wl,-z,noexecstack'
+    - '-Wl,-z,relro'
+    - '-Wl,-z,now'
+    - '-Wl,--build-id=sha1'
+  needs:
+    - autoconf
+    - bdb
+    - binutils
+    - bzip2
+    - expat
+    - libedit
+    - libffi
+    - libX11
+    - libXau
+    - libxcb
+    - linux-uapi
+    - m4
+    - mpdecimal
+    - ncurses
+    - openssl-3.5
+    - patchelf
+    - sqlite
+    - tcl
+    - tk
+    - uuid
+    - xorgproto
+    - xz
+    - zlib
+    - zstd
+  openssl_target: linux-armv4
+
+armv7-unknown-linux-gnueabihf:
+  linux_uapi_include_arch: arm-linux-gnueabihf
+  host_platforms:
+    - linux_x86_64
+  pythons_supported:
+    - '3.10'
+    - '3.11'
+    - '3.12'
+    - '3.13'
+    - '3.14'
+    - '3.15'
+  docker_image_suffix: .cross
+  host_cc: /usr/bin/x86_64-linux-gnu-gcc
+  host_cxx: /usr/bin/x86_64-linux-gnu-g++
+  target_cc: /usr/bin/arm-linux-gnueabihf-gcc
+  target_cxx: /usr/bin/arm-linux-gnueabihf-g++
+  target_cflags:
+    # Hardening
+    - '-fstack-protector'
+    - '-U_FORTIFY_SOURCE'
+    - '-D_FORTIFY_SOURCE=2'
+  target_ldflags:
+    # Hardening
+    - '-Wl,-z,noexecstack'
+    - '-Wl,-z,relro'
+    - '-Wl,-z,now'
+    - '-Wl,--build-id=sha1'
+  needs:
+    - autoconf
+    - bdb
+    - binutils
+    - bzip2
+    - expat
+    - libedit
+    - libffi
+    - libX11
+    - libXau
+    - libxcb
+    - linux-uapi
+    - m4
+    - mpdecimal
+    - ncurses
+    - openssl-3.5
+    - patchelf
+    - sqlite
+    - tcl
+    - tk
+    - uuid
+    - xorgproto
+    - xz
+    - zlib
+    - zstd
+  openssl_target: linux-armv4
+
+loongarch64-unknown-linux-gnu:
+  linux_uapi_include_arch: loongarch64-linux-gnu
+  host_platforms:
+    - linux_x86_64
+  pythons_supported:
+    - '3.10'
+    - '3.11'
+    - '3.12'
+    - '3.13'
+    - '3.14'
+    - '3.15'
+  docker_image_suffix: .cross-loongarch64
+  host_cc: /usr/bin/x86_64-linux-gnu-gcc
+  host_cxx: /usr/bin/x86_64-linux-gnu-g++
+  target_cc: /usr/bin/loongarch64-linux-gnu-gcc
+  target_cxx: /usr/bin/loongarch64-linux-gnu-g++
+  target_cflags:
+    # Hardening
+    - '-fstack-protector'
+    - '-U_FORTIFY_SOURCE'
+    - '-D_FORTIFY_SOURCE=2'
+  target_ldflags:
+    # Hardening
+    - '-Wl,-z,noexecstack'
+    - '-Wl,-z,relro'
+    - '-Wl,-z,now'
+    - '-Wl,--build-id=sha1'
+    - '-Wl,-z,max-page-size=0x10000'
+  needs:
+    - autoconf
+    - bdb
+    - binutils
+    - bzip2
+    - expat
+    - libedit
+    - libffi
+    - libX11
+    - libXau
+    - libxcb
+    - linux-uapi
+    - m4
+    - mpdecimal
+    - ncurses
+    - openssl-3.5
+    - patchelf
+    - sqlite
+    - tcl
+    - tk
+    - uuid
+    - xorgproto
+    - xz
+    - zlib
+    - zstd
+  openssl_target: linux64-loongarch64
+
+mips-unknown-linux-gnu:
+  linux_uapi_include_arch: mips-linux-gnu
+  host_platforms:
+    - linux_x86_64
+  pythons_supported:
+    - '3.10'
+    - '3.11'
+    - '3.12'
+    - '3.13'
+    - '3.14'
+    - '3.15'
+  docker_image_suffix: .cross
+  host_cc: /usr/bin/x86_64-linux-gnu-gcc
+  host_cxx: /usr/bin/x86_64-linux-gnu-g++
+  target_cc: /usr/bin/mips-linux-gnu-gcc
+  target_cxx: /usr/bin/mips-linux-gnu-g++
+  target_cflags:
+    # Hardening
+    - '-fstack-protector'
+    - '-U_FORTIFY_SOURCE'
+    - '-D_FORTIFY_SOURCE=2'
+  target_ldflags:
+    # Hardening
+    - '-Wl,-z,noexecstack'
+    - '-Wl,-z,relro'
+    - '-Wl,-z,now'
+    - '-Wl,--build-id=sha1'
+  needs:
+    - autoconf
+    - bdb
+    - binutils
+    - bzip2
+    - expat
+    - libedit
+    - libffi
+    - libX11
+    - libXau
+    - libxcb
+    - linux-uapi
+    - m4
+    - mpdecimal
+    - ncurses
+    - openssl-3.5
+    - patchelf
+    - sqlite
+    - tcl
+    - tk
+    - uuid
+    - xorgproto
+    - xz
+    - zlib
+    - zstd
+  openssl_target: linux-mips32
+
+mipsel-unknown-linux-gnu:
+  linux_uapi_include_arch: mipsel-linux-gnu
+  host_platforms:
+    - linux_x86_64
+  pythons_supported:
+    - '3.10'
+    - '3.11'
+    - '3.12'
+    - '3.13'
+    - '3.14'
+    - '3.15'
+  docker_image_suffix: .cross
+  host_cc: /usr/bin/x86_64-linux-gnu-gcc
+  host_cxx: /usr/bin/x86_64-linux-gnu-g++
+  target_cc: /usr/bin/mipsel-linux-gnu-gcc
+  target_cxx: /usr/bin/mipsel-linux-gnu-g++
+  target_cflags:
+    # Hardening
+    - '-fstack-protector'
+    - '-U_FORTIFY_SOURCE'
+    - '-D_FORTIFY_SOURCE=2'
+  target_ldflags:
+    # Hardening
+    - '-Wl,-z,noexecstack'
+    - '-Wl,-z,relro'
+    - '-Wl,-z,now'
+    - '-Wl,--build-id=sha1'
+  needs:
+    - autoconf
+    - bdb
+    - binutils
+    - bzip2
+    - expat
+    - libedit
+    - libffi
+    - libX11
+    - libXau
+    - libxcb
+    - linux-uapi
+    - m4
+    - mpdecimal
+    - ncurses
+    - openssl-3.5
+    - patchelf
+    - sqlite
+    - tcl
+    - tk
+    - uuid
+    - xorgproto
+    - xz
+    - zlib
+    - zstd
+  openssl_target: linux-mips32
+
+ppc64le-unknown-linux-gnu:
+  linux_uapi_include_arch: powerpc64le-linux-gnu
+  host_platforms:
+    - linux_x86_64
+  pythons_supported:
+    - '3.10'
+    - '3.11'
+    - '3.12'
+    - '3.13'
+    - '3.14'
+    - '3.15'
+  docker_image_suffix: .cross
+  host_cc: /usr/bin/x86_64-linux-gnu-gcc
+  host_cxx: /usr/bin/x86_64-linux-gnu-g++
+  target_cc: /usr/bin/powerpc64le-linux-gnu-gcc
+  target_cxx: /usr/bin/powerpc64le-linux-gnu-g++
+  target_cflags:
+    # Hardening
+    - '-fstack-protector'
+    - '-U_FORTIFY_SOURCE'
+    - '-D_FORTIFY_SOURCE=2'
+  target_ldflags:
+    # Hardening
+    - '-Wl,-z,noexecstack'
+    - '-Wl,-z,relro'
+    - '-Wl,-z,now'
+    - '-Wl,--build-id=sha1'
+  needs:
+    - autoconf
+    - bdb
+    - binutils
+    - bzip2
+    - expat
+    - libedit
+    - libffi
+    - libX11
+    - libXau
+    - libxcb
+    - linux-uapi
+    - m4
+    - mpdecimal
+    - ncurses
+    - openssl-3.5
+    - patchelf
+    - sqlite
+    - tcl
+    - tk
+    - uuid
+    - xorgproto
+    - xz
+    - zlib
+    - zstd
+  openssl_target: linux-ppc64le
+
+riscv64-unknown-linux-gnu:
+  linux_uapi_include_arch: riscv64-linux-gnu
+  host_platforms:
+    - linux_x86_64
+  pythons_supported:
+    - '3.10'
+    - '3.11'
+    - '3.12'
+    - '3.13'
+    - '3.14'
+    - '3.15'
+  docker_image_suffix: .cross-riscv64
+  host_cc: /usr/bin/x86_64-linux-gnu-gcc
+  host_cxx: /usr/bin/x86_64-linux-gnu-g++
+  target_cc: /usr/bin/riscv64-linux-gnu-gcc
+  target_cxx: /usr/bin/riscv64-linux-gnu-g++
+  target_cflags:
+    # Hardening
+    - '-fstack-protector'
+    - '-U_FORTIFY_SOURCE'
+    - '-D_FORTIFY_SOURCE=2'
+  target_ldflags:
+    # Hardening
+    - '-Wl,-z,noexecstack'
+    - '-Wl,-z,relro'
+    - '-Wl,-z,now'
+    - '-Wl,--build-id=sha1'
+  needs:
+    - autoconf
+    - bdb
+    - binutils
+    - bzip2
+    - expat
+    - libedit
+    - libffi
+    - libX11
+    - libXau
+    - libxcb
+    - linux-uapi
+    - m4
+    - mpdecimal
+    - ncurses
+    - openssl-3.5
+    - patchelf
+    - sqlite
+    - tcl
+    - tk
+    - uuid
+    - xorgproto
+    - xz
+    - zlib
+    - zstd
+  openssl_target: linux64-riscv64
+
+s390x-unknown-linux-gnu:
+  linux_uapi_include_arch: s390x-linux-gnu
+  host_platforms:
+    - linux_x86_64
+  pythons_supported:
+    - '3.10'
+    - '3.11'
+    - '3.12'
+    - '3.13'
+    - '3.14'
+    - '3.15'
+  docker_image_suffix: .cross
+  host_cc: /usr/bin/x86_64-linux-gnu-gcc
+  host_cxx: /usr/bin/x86_64-linux-gnu-g++
+  target_cc: /usr/bin/s390x-linux-gnu-gcc
+  target_cxx: /usr/bin/s390x-linux-gnu-g++
+  target_cflags:
+    # Hardening
+    - '-fstack-protector'
+    - '-U_FORTIFY_SOURCE'
+    - '-D_FORTIFY_SOURCE=2'
+    # set the minimum compatibility level to z10 (released 2008)
+    - '-march=z10'
+  target_ldflags:
+    # Hardening
+    - '-Wl,-z,noexecstack'
+    - '-Wl,-z,relro'
+    - '-Wl,-z,now'
+    - '-Wl,--build-id=sha1'
+  needs:
+    - autoconf
+    - bdb
+    - binutils
+    - bzip2
+    - expat
+    - libedit
+    - libffi
+    - libX11
+    - libXau
+    - libxcb
+    - linux-uapi
+    - m4
+    - mpdecimal
+    - ncurses
+    - openssl-3.5
+    - patchelf
+    - sqlite
+    - tcl
+    - tk
+    - uuid
+    - xorgproto
+    - xz
+    - zlib
+    - zstd
+  openssl_target: linux64-s390x
+
+# Intel macOS.
+#
+# We target compatibility with macOS 10.15+ for compatibility with older Apple
+# machines.
+x86_64-apple-darwin:
+  host_platforms:
+    - macos_arm64
+    - macos_x86_64
+  pythons_supported:
+    - '3.10'
+    - '3.11'
+    - '3.12'
+    - '3.13'
+    - '3.14'
+    - '3.15'
+  needs_toolchain: true
+  apple_sdk_platform: macosx
+  host_cc: clang
+  host_cxx: clang++
+  target_cc: clang
+  target_cxx: clang++
+  target_cflags:
+    - '-arch'
+    - 'x86_64'
+    - '-mmacosx-version-min=10.15'
+    # Suppress extremely verbose warnings we see with LLVM 10.
+    - '-Wno-nullability-completeness'
+    - '-Wno-expansion-to-defined'
+    # LLVM 11 contains commit https://reviews.llvm.org/D83250,
+    # which enables -Werror for undef-prefix=TARGET_OS_.
+    # However, the macOS SDK has headers that reference deprecated
+    # TARGET_OS defines, like TARGET_OS_EMBEDDED. So LLVM 11 refuses
+    # to work with the macOS SDKs out of the box. We work around
+    # this by undoing the -Werror=undef-prefix in that commit.
+    - '-Wno-undef-prefix'
+    - '-fvisibility=hidden'
+  target_ldflags:
+    - '-arch'
+    - 'x86_64'
+    - '-mmacosx-version-min=10.15'
+  needs:
+    - autoconf
+    - bzip2
+    - expat
+    - libffi
+    - m4
+    - mpdecimal
+    - openssl-3.5
+    - pkgconf
+    - sqlite
+    - tcl
+    - tk
+    - uuid
+    - xz
+    - zstd
+  openssl_target: darwin64-x86_64-cc
+
+x86_64-unknown-linux-gnu:
+  docker_image_suffix: .debian13-x86_64
+  linux_uapi_include_arch: x86_64-linux-gnu
+  host_platforms:
+    - linux_x86_64
+    - macos_arm64
+  pythons_supported:
+    - '3.10'
+    - '3.11'
+    - '3.12'
+    - '3.13'
+    - '3.14'
+    - '3.15'
+  needs_toolchain: true
+  host_cc: clang
+  host_cxx: clang++
+  target_cc: clang
+  target_cxx: clang++
+  target_cflags:
+    # Keep target libc independent of the modern build container.
+    - '--sysroot=/usr/x86_64-linux-gnu'
+    # Hardening
+    - '-fstack-protector'
+    - '-fstack-clash-protection'
+    - '-U_FORTIFY_SOURCE'
+    - '-D_FORTIFY_SOURCE=2'
+    - '-fvisibility=hidden'
+    # Enable frame pointers
+    - '-fno-omit-frame-pointer'
+    - '-mno-omit-leaf-frame-pointer'
+    # Needed to prevent BOLT from crashing.
+    - '-fdebug-default-version=4'
+  target_ldflags:
+    - '--sysroot=/usr/x86_64-linux-gnu'
+    # Hardening
+    - '-Wl,-z,noexecstack'
+    - '-Wl,-z,relro'
+    - '-Wl,-z,now'
+    - '-Wl,--build-id=sha1'
+  needs:
+    - autoconf
+    - bdb
+    - binutils
+    - bzip2
+    - expat
+    - libedit
+    - libffi
+    - libX11
+    - libXau
+    - libxcb
+    - linux-uapi
+    - m4
+    - mpdecimal
+    - ncurses
+    - openssl-3.5
+    - patchelf
+    - sqlite
+    - tcl
+    - tk
+    - uuid
+    - xorgproto
+    - xz
+    - zlib
+    - zstd
+  openssl_target: linux-x86_64
+  bolt_capable: true
+
+x86_64_v2-unknown-linux-gnu:
+  docker_image_suffix: .debian13-x86_64
+  linux_uapi_include_arch: x86_64-linux-gnu
+  host_platforms:
+    - linux_x86_64
+    - macos_arm64
+  pythons_supported:
+    - '3.10'
+    - '3.11'
+    - '3.12'
+    - '3.13'
+    - '3.14'
+    - '3.15'
+  needs_toolchain: true
+  host_cc: clang
+  host_cxx: clang++
+  target_cc: clang
+  target_cxx: clang++
+  target_cflags:
+    # Keep target libc independent of the modern build container.
+    - '--sysroot=/usr/x86_64-linux-gnu'
+    # Hardening
+    - '-fstack-protector'
+    - '-fstack-clash-protection'
+    - '-U_FORTIFY_SOURCE'
+    - '-D_FORTIFY_SOURCE=2'
+    - '-march=x86-64-v2'
+    - '-fvisibility=hidden'
+    # Enable frame pointers
+    - '-fno-omit-frame-pointer'
+    - '-mno-omit-leaf-frame-pointer'
+    # Needed to prevent BOLT from crashing.
+    - '-fdebug-default-version=4'
+  target_ldflags:
+    - '--sysroot=/usr/x86_64-linux-gnu'
+    # Hardening
+    - '-Wl,-z,noexecstack'
+    - '-Wl,-z,relro'
+    - '-Wl,-z,now'
+    - '-Wl,--build-id=sha1'
+  needs:
+    - autoconf
+    - bdb
+    - binutils
+    - bzip2
+    - expat
+    - libedit
+    - libffi
+    - libX11
+    - libXau
+    - libxcb
+    - linux-uapi
+    - m4
+    - mpdecimal
+    - ncurses
+    - openssl-3.5
+    - patchelf
+    - sqlite
+    - tcl
+    - tk
+    - uuid
+    - xorgproto
+    - xz
+    - zlib
+    - zstd
+  openssl_target: linux-x86_64
+  bolt_capable: true
+
+x86_64_v3-unknown-linux-gnu:
+  docker_image_suffix: .debian13-x86_64
+  linux_uapi_include_arch: x86_64-linux-gnu
+  host_platforms:
+    - linux_x86_64
+    - macos_arm64
+  pythons_supported:
+    - '3.10'
+    - '3.11'
+    - '3.12'
+    - '3.13'
+    - '3.14'
+    - '3.15'
+  needs_toolchain: true
+  host_cc: clang
+  host_cxx: clang++
+  target_cc: clang
+  target_cxx: clang++
+  target_cflags:
+    # Keep target libc independent of the modern build container.
+    - '--sysroot=/usr/x86_64-linux-gnu'
+    # Hardening
+    - '-fstack-protector'
+    - '-fstack-clash-protection'
+    - '-U_FORTIFY_SOURCE'
+    - '-D_FORTIFY_SOURCE=2'
+    - '-march=x86-64-v3'
+    - '-fvisibility=hidden'
+    # Enable frame pointers
+    - '-fno-omit-frame-pointer'
+    - '-mno-omit-leaf-frame-pointer'
+    # Needed to prevent BOLT from crashing.
+    - '-fdebug-default-version=4'
+  target_ldflags:
+    - '--sysroot=/usr/x86_64-linux-gnu'
+    # Hardening
+    - '-Wl,-z,noexecstack'
+    - '-Wl,-z,relro'
+    - '-Wl,-z,now'
+    - '-Wl,--build-id=sha1'
+  needs:
+    - autoconf
+    - bdb
+    - binutils
+    - bzip2
+    - expat
+    - libedit
+    - libffi
+    - libX11
+    - libXau
+    - libxcb
+    - linux-uapi
+    - m4
+    - mpdecimal
+    - ncurses
+    - openssl-3.5
+    - patchelf
+    - sqlite
+    - tcl
+    - tk
+    - uuid
+    - xorgproto
+    - xz
+    - zlib
+    - zstd
+  openssl_target: linux-x86_64
+  bolt_capable: true
+
+x86_64_v4-unknown-linux-gnu:
+  docker_image_suffix: .debian13-x86_64
+  linux_uapi_include_arch: x86_64-linux-gnu
+  host_platforms:
+    - linux_x86_64
+    # Rosetta doesn't support AVX-512. So we cannot run x86-64-v4 binaries
+    # under Rosetta. But they can build correctly.
+    - macos_arm64
+  pythons_supported:
+    - '3.10'
+    - '3.11'
+    - '3.12'
+    - '3.13'
+    - '3.14'
+    - '3.15'
+  needs_toolchain: true
+  host_cc: clang
+  host_cxx: clang++
+  target_cc: clang
+  target_cxx: clang++
+  target_cflags:
+    # Keep target libc independent of the modern build container.
+    - '--sysroot=/usr/x86_64-linux-gnu'
+    # Hardening
+    - '-fstack-protector'
+    - '-fstack-clash-protection'
+    - '-U_FORTIFY_SOURCE'
+    - '-D_FORTIFY_SOURCE=2'
+    - '-march=x86-64-v4'
+    - '-fvisibility=hidden'
+    # Enable frame pointers
+    - '-fno-omit-frame-pointer'
+    - '-mno-omit-leaf-frame-pointer'
+    # Needed to prevent BOLT from crashing.
+    - '-fdebug-default-version=4'
+  target_ldflags:
+    - '--sysroot=/usr/x86_64-linux-gnu'
+    # Hardening
+    - '-Wl,-z,noexecstack'
+    - '-Wl,-z,relro'
+    - '-Wl,-z,now'
+    - '-Wl,--build-id=sha1'
+  needs:
+    - autoconf
+    - bdb
+    - binutils
+    - bzip2
+    - expat
+    - libedit
+    - libffi
+    - libX11
+    - libXau
+    - libxcb
+    - linux-uapi
+    - m4
+    - mpdecimal
+    - ncurses
+    - openssl-3.5
+    - patchelf
+    - sqlite
+    - tcl
+    - tk
+    - uuid
+    - xorgproto
+    - xz
+    - zlib
+    - zstd
+  openssl_target: linux-x86_64
+  bolt_capable: true
+
+x86_64-unknown-linux-musl:
+  docker_image_suffix: .debian13-x86_64
+  host_platforms:
+    - linux_x86_64
+    - macos_arm64
+  pythons_supported:
+    - '3.10'
+    - '3.11'
+    - '3.12'
+    - '3.13'
+    - '3.14'
+    - '3.15'
+  needs_toolchain: true
+  host_cc: clang
+  host_cxx: clang++
+  target_cc: musl-clang
+  target_cxx: clang++  # TODO: Explore a musl-clang++ shim?
+  target_cflags:
+    # Hardening
+    - '-fstack-protector'
+    - '-fstack-clash-protection'
+    - '-fvisibility=hidden'
+    # Enable frame pointers
+    - '-fno-omit-frame-pointer'
+    - '-mno-omit-leaf-frame-pointer'
+  target_ldflags:
+    # Hardening
+    - '-Wl,-z,noexecstack'
+    - '-Wl,-z,relro'
+    - '-Wl,-z,now'
+    - '-Wl,--build-id=sha1'
+  needs:
+    - autoconf
+    - bdb
+    - binutils
+    - bzip2
+    - expat
+    - libedit
+    - libffi
+    - libX11
+    - libXau
+    - libxcb
+    - m4
+    - mpdecimal
+    - musl
+    - ncurses
+    - openssl-3.5
+    - patchelf
+    - sqlite
+    - tcl
+    - tk
+    - uuid
+    - xorgproto
+    - xz
+    - zlib
+    - zstd
+  openssl_target: linux-x86_64
+
+x86_64_v2-unknown-linux-musl:
+  docker_image_suffix: .debian13-x86_64
+  host_platforms:
+    - linux_x86_64
+    - macos_arm64
+  pythons_supported:
+    - '3.10'
+    - '3.11'
+    - '3.12'
+    - '3.13'
+    - '3.14'
+    - '3.15'
+  needs_toolchain: true
+  host_cc: clang
+  host_cxx: clang++
+  target_cc: musl-clang
+  target_cxx: clang++  # TODO: Explore a musl-clang++ shim?
+  target_cflags:
+    # Hardening
+    - '-fstack-protector'
+    - '-fstack-clash-protection'
+    - '-march=x86-64-v2'
+    - '-fvisibility=hidden'
+    # Enable frame pointers
+    - '-fno-omit-frame-pointer'
+    - '-mno-omit-leaf-frame-pointer'
+  target_ldflags:
+    # Hardening
+    - '-Wl,-z,noexecstack'
+    - '-Wl,-z,relro'
+    - '-Wl,-z,now'
+    - '-Wl,--build-id=sha1'
+  needs:
+    - autoconf
+    - bdb
+    - binutils
+    - bzip2
+    - expat
+    - libedit
+    - libffi
+    - libX11
+    - libXau
+    - libxcb
+    - m4
+    - mpdecimal
+    - musl
+    - ncurses
+    - openssl-3.5
+    - patchelf
+    - sqlite
+    - tcl
+    - tk
+    - uuid
+    - xorgproto
+    - xz
+    - zlib
+    - zstd
+  openssl_target: linux-x86_64
+
+x86_64_v3-unknown-linux-musl:
+  docker_image_suffix: .debian13-x86_64
+  host_platforms:
+    - linux_x86_64
+    - macos_arm64
+  pythons_supported:
+    - '3.10'
+    - '3.11'
+    - '3.12'
+    - '3.13'
+    - '3.14'
+    - '3.15'
+  needs_toolchain: true
+  host_cc: clang
+  host_cxx: clang++
+  target_cc: musl-clang
+  target_cxx: clang++  # TODO: Explore a musl-clang++ shim?
+  target_cflags:
+    # Hardening
+    - '-fstack-protector'
+    - '-fstack-clash-protection'
+    - '-march=x86-64-v3'
+    - '-fvisibility=hidden'
+    # Enable frame pointers
+    - '-fno-omit-frame-pointer'
+    - '-mno-omit-leaf-frame-pointer'
+  target_ldflags:
+    # Hardening
+    - '-Wl,-z,noexecstack'
+    - '-Wl,-z,relro'
+    - '-Wl,-z,now'
+    - '-Wl,--build-id=sha1'
+  needs:
+    - autoconf
+    - bdb
+    - binutils
+    - bzip2
+    - expat
+    - libedit
+    - libffi
+    - libX11
+    - libXau
+    - libxcb
+    - m4
+    - mpdecimal
+    - musl
+    - ncurses
+    - openssl-3.5
+    - patchelf
+    - sqlite
+    - tcl
+    - tk
+    - uuid
+    - xorgproto
+    - xz
+    - zlib
+    - zstd
+  openssl_target: linux-x86_64
+
+x86_64_v4-unknown-linux-musl:
+  docker_image_suffix: .debian13-x86_64
+  host_platforms:
+    - linux_x86_64
+    # Rosetta doesn't support AVX-512. So we cannot run x86-64-v4 binaries
+    # under Rosetta. But they can build correctly.
+    - macos_arm64
+  pythons_supported:
+    - '3.10'
+    - '3.11'
+    - '3.12'
+    - '3.13'
+    - '3.14'
+    - '3.15'
+  needs_toolchain: true
+  host_cc: clang
+  host_cxx: clang++
+  target_cc: musl-clang
+  target_cxx: clang++  # TODO: Explore a musl-clang++ shim?
+  target_cflags:
+    # Hardening
+    - '-fstack-protector'
+    - '-fstack-clash-protection'
+    - '-march=x86-64-v4'
+    - '-fvisibility=hidden'
+    # Enable frame pointers
+    - '-fno-omit-frame-pointer'
+    - '-mno-omit-leaf-frame-pointer'
+  target_ldflags:
+    # Hardening
+    - '-Wl,-z,noexecstack'
+    - '-Wl,-z,relro'
+    - '-Wl,-z,now'
+    - '-Wl,--build-id=sha1'
+  needs:
+    - autoconf
+    - bdb
+    - binutils
+    - bzip2
+    - expat
+    - libedit
+    - libffi
+    - libX11
+    - libXau
+    - libxcb
+    - m4
+    - mpdecimal
+    - musl
+    - ncurses
+    - openssl-3.5
+    - patchelf
+    - sqlite
+    - tcl
+    - tk
+    - uuid
+    - xorgproto
+    - xz
+    - zlib
+    - zstd
+  openssl_target: linux-x86_64
+
+aarch64-unknown-linux-musl:
+  host_platforms:
+    - linux_x86_64
+    - linux_aarch64
+    - macos_arm64
+  pythons_supported:
+    - '3.10'
+    - '3.11'
+    - '3.12'
+    - '3.13'
+    - '3.14'
+    - '3.15'
+  needs_toolchain: true
+  docker_image_suffix: .debian13
+  needs_toolchain: true
+  host_cc: clang
+  host_cxx: clang++
+  target_cc: musl-clang
+  target_cxx: clang++
+  target_cflags:
+    # Hardening
+    - '-fstack-protector'
+    - '-fstack-clash-protection'
+    - '-fvisibility=hidden'
+    # Enable frame pointers
+    - '-fno-omit-frame-pointer'
+    - '-mno-omit-leaf-frame-pointer'
+  target_ldflags:
+    # Hardening
+    - '-Wl,-z,noexecstack'
+    - '-Wl,-z,relro'
+    - '-Wl,-z,now'
+    - '-Wl,--build-id=sha1'
+  needs:
+    - autoconf
+    - bdb
+    - binutils
+    - bzip2
+    - expat
+    - libedit
+    - libffi
+    - libX11
+    - libXau
+    - libxcb
+    - m4
+    - mpdecimal
+    - musl
+    - ncurses
+    - openssl-3.5
+    - patchelf
+    - sqlite
+    - tcl
+    - tk
+    - uuid
+    - xorgproto
+    - xz
+    - zlib
+    - zstd
+  openssl_target: linux-aarch64

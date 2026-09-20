@@ -1,0 +1,12 @@
+diff --git a/Tools/jit/_llvm.py b/Tools/jit/_llvm.py
+--- a/Tools/jit/_llvm.py
++++ b/Tools/jit/_llvm.py
+@@ -10,7 +10,7 @@ import typing
+ 
+ import _targets
+ 
+-_LLVM_VERSION = 19
++_LLVM_VERSION = 22
+ _LLVM_VERSION_PATTERN = re.compile(
+     rf"(?<!Apple )(LLVM|clang) version\s+{_LLVM_VERSION}\.\d+\.\d+\S*\s+"
+ )
