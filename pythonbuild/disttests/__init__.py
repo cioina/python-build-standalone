@@ -4,6 +4,7 @@
 
 import importlib.machinery
 import os
+import shutil
 import struct
 import subprocess
 import sys
@@ -44,6 +45,33 @@ if "TERMINFO_DIRS" not in os.environ:
 
 
 class TestPythonInterpreter(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows executable names")
+    def test_windows_executables(self):
+        build_options = os.environ["BUILD_OPTIONS"].split("+")
+        install_dir = Path(sys.executable).parent
+        major, minor = sys.version_info[:2]
+
+        if "debug" in build_options:
+            self.assertTrue((install_dir / "python_d.exe").is_file())
+            self.assertTrue((install_dir / "pythonw_d.exe").is_file())
+            self.assertFalse((install_dir / "python.exe").exists())
+            self.assertFalse((install_dir / "pythonw.exe").exists())
+            if "freethreaded" in build_options:
+                self.assertTrue(
+                    (install_dir / f"python{major}.{minor}t_d.exe").is_file()
+                )
+                self.assertTrue(
+                    (install_dir / f"pythonw{major}.{minor}t_d.exe").is_file()
+                )
+        else:
+            self.assertTrue((install_dir / "python.exe").is_file())
+            self.assertTrue((install_dir / "pythonw.exe").is_file())
+            if "freethreaded" in build_options:
+                self.assertTrue((install_dir / f"python{major}.{minor}t.exe").is_file())
+                self.assertTrue(
+                    (install_dir / f"pythonw{major}.{minor}t.exe").is_file()
+                )
+
     def test_compression(self):
         import bz2
         import lzma
@@ -211,7 +239,7 @@ class TestPythonInterpreter(unittest.TestCase):
         if os.name == "nt" and sys.version_info[0:2] < (3, 11):
             wanted_version = (1, 1, 1, 23, 15)
         else:
-            wanted_version = (3, 5, 0, 8, 0)
+            wanted_version = (3, 5, 0, 9, 0)
 
         self.assertEqual(ssl.OPENSSL_VERSION_INFO, wanted_version)
 
@@ -271,6 +299,33 @@ class TestPythonInterpreter(unittest.TestCase):
             "Expected multithreading to be enabled but max threads is zero"
         )
 
+    @unittest.skipUnless(os.name == "nt", "Windows Tcl/Tk packaging")
+    def test_windows_tcltk(self):
+        import tkinter
+
+        install_dir = Path(sys.executable).parent
+        self.assertTrue((install_dir / "DLLs" / "zlib1.dll").is_file())
+        if sys.version_info >= (3, 14):
+            self.assertTrue((install_dir / "DLLs" / "tcl90.dll").is_file())
+            self.assertTrue((install_dir / "DLLs" / "tcl9tk90.dll").is_file())
+            self.assertTrue((install_dir / "DLLs" / "libtommath.dll").is_file())
+            self.assertTrue(
+                (install_dir / "tcl" / "registry1.3" / "pkgIndex.tcl").is_file()
+            )
+            version = "9.0"
+        else:
+            self.assertTrue((install_dir / "DLLs" / "tcl86t.dll").is_file())
+            self.assertTrue((install_dir / "DLLs" / "tk86t.dll").is_file())
+            self.assertTrue((install_dir / "tcl" / "tcl8.6" / "init.tcl").is_file())
+            self.assertTrue((install_dir / "tcl" / "tk8.6" / "tk.tcl").is_file())
+            version = "8.6"
+
+        interpreter = tkinter.Tcl()
+        self.assertEqual(interpreter.call("info", "tclversion"), version)
+        self.assertEqual(
+            interpreter.eval("zlib decompress [zlib compress test]"), "test"
+        )
+
     @unittest.skipIf("TCL_LIBRARY" not in os.environ, "TCL_LIBRARY not set")
     @unittest.skipIf("DISPLAY" not in os.environ, "DISPLAY not set")
     def test_tkinter(self):
@@ -279,7 +334,6 @@ class TestPythonInterpreter(unittest.TestCase):
         class Application(tk.Frame):
             def __init__(self, master=None):
                 super().__init__(master)
-                self.master = master
                 self.pack()
 
                 self.hi_there = tk.Button(self)
@@ -287,10 +341,10 @@ class TestPythonInterpreter(unittest.TestCase):
                 self.hi_there["command"] = self.say_hi
                 self.hi_there.pack(side="top")
 
-                self.quit = tk.Button(
+                self.quit_button = tk.Button(
                     self, text="QUIT", fg="red", command=self.master.destroy
                 )
-                self.quit.pack(side="bottom")
+                self.quit_button.pack(side="bottom")
 
             def say_hi(self):
                 print("hi there, everyone!")
@@ -346,7 +400,7 @@ class TestPythonInterpreter(unittest.TestCase):
                     assertPythonWorks(venv / "bin" / "python")
 
         with self.subTest(msg="weird argv[0]"):
-            assertPythonWorks(sys.executable, argv0="/dev/null")
+            assertPythonWorks(Path(sys.executable), argv0="/dev/null")
 
     @unittest.skipUnless(sys.platform == "linux", "Linux-specific socket constant")
     # TODO(jjh) remove when musl builds use a sysroot
@@ -477,6 +531,98 @@ class TestPythonInterpreter(unittest.TestCase):
         t.start()
         t.join()
         self.assertEqual(a, ["Thread was here"])
+
+    @unittest.skipUnless(
+        "-linux-gnu" in os.environ["TARGET_TRIPLE"],
+        "sem_clockwait runtime detection is enabled for Linux GNU targets",
+    )
+    @unittest.skipIf(
+        "static" in os.environ["BUILD_OPTIONS"],
+        "LD_PRELOAD is unavailable for static builds",
+    )
+    def test_thread_timeouts_use_monotonic_clock(self):
+        import ctypes
+
+        try:
+            _sem_clockwait = ctypes.CDLL(None).sem_clockwait
+        except AttributeError:
+            self.skipTest("runtime libc does not provide sem_clockwait")
+
+        compiler = shutil.which("cc")
+        if compiler is None:
+            self.skipTest("C compiler unavailable")
+
+        probe = """
+import queue
+import sys
+import threading
+import time
+
+primitive = sys.argv[1]
+timeout = float(sys.argv[2])
+start = time.monotonic()
+cpu_start = time.process_time()
+
+if primitive == "event":
+    threading.Event().wait(timeout)
+elif primitive == "queue":
+    try:
+        queue.Queue().get(timeout=timeout)
+    except queue.Empty:
+        pass
+elif primitive in {"lock", "rlock"}:
+    lock = threading.Lock() if primitive == "lock" else threading.RLock()
+    lock.acquire()
+    thread = threading.Thread(target=lambda: lock.acquire(timeout=timeout))
+    thread.start()
+    thread.join()
+elif primitive == "join":
+    thread = threading.Thread(target=lambda: time.sleep(timeout + 2), daemon=True)
+    thread.start()
+    thread.join(timeout)
+else:
+    raise ValueError(f"unknown primitive: {primitive}")
+
+print(time.monotonic() - start, time.process_time() - cpu_start)
+"""
+
+        with tempfile.TemporaryDirectory(prefix="disttests-") as temp_dir:
+            preload = Path(temp_dir) / "realtime-offset.so"
+            subprocess.check_call(
+                [
+                    compiler,
+                    "-shared",
+                    "-fPIC",
+                    "-O2",
+                    "-Wall",
+                    "-Werror",
+                    "-o",
+                    preload,
+                    Path(__file__).with_name("realtime_offset.c"),
+                    "-ldl",
+                ]
+            )
+
+            timeout = 0.1
+            for offset in (2, -2):
+                env = dict(os.environ)
+                env["LD_PRELOAD"] = str(preload)
+                env["REALTIME_OFFSET_SECONDS"] = str(offset)
+
+                for primitive in ("lock", "rlock", "event", "queue", "join"):
+                    with self.subTest(offset=offset, primitive=primitive):
+                        output = subprocess.check_output(
+                            [sys.executable, "-c", probe, primitive, str(timeout)],
+                            env=env,
+                            text=True,
+                            timeout=4,
+                        )
+                        elapsed, cpu_elapsed = map(float, output.split())
+                        self.assertGreater(elapsed, timeout / 2)
+                        self.assertLess(elapsed, timeout + 1)
+                        # Higher-level waits retry after an early wakeup. They
+                        # must block instead of spinning until their deadline.
+                        self.assertLess(cpu_elapsed, timeout / 2)
 
 
 if __name__ == "__main__":

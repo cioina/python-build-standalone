@@ -252,13 +252,6 @@ expected-failures:
     build-option: "static"
     reason: "missing _testcapi"
 
-  - name: test.test_atexit.SubinterpreterTest.test_atexit_with_low_memory
-    targets:
-      - ".+-unknown-linux-musl"
-    minimum-python-version: "3.14"
-    build-option: "static"
-    reason: "missing _testcapi"
-
   - name: test.test_atexit.SubinterpreterTest.test_callback_on_subinterpreter_teardown
     targets:
       - ".+-unknown-linux-musl"
@@ -395,6 +388,21 @@ expected-failures:
     reason: missing _testcapi
     minimum-python-version: "3.14"
 
+  - name: test.test_c_stack_unwind.ManualStackUnwindTests.test_manual_unwind_finds_expected_frames
+    targets:
+      - "aarch64-unknown-linux-gnu"
+    minimum-python-version: "3.15"
+    build-option: "pgo"
+    no-build-option: "freethreaded"
+    reason: "The manual frame-pointer unwinder stops after one frame and finds no Python frames in the optimized build"
+
+  - name: test.test_c_stack_unwind.ManualStackUnwindTests.test_manual_unwind_finds_expected_frames
+    targets:
+      - ".+-unknown-linux-musl"
+    minimum-python-version: "3.15"
+    build-option: "static"
+    reason: "The manual unwinder cannot identify Python frames in the statically linked executable"
+
   - name: test.test_capi.test_misc.Test_testinternalcapi.test_threadstate_set_stack_protection
     minimum-python-version: "3.14"
     targets:
@@ -414,6 +422,18 @@ expected-failures:
     # our test harness from getting confused.
     no-build-option: "static"
     reason: "crash"
+
+  - name: test.test_cext.*.test_build*
+    targets:
+      - "aarch64-unknown-linux-gnu"
+    minimum-python-version: "3.12"
+    reason: "The stdlib runner's Clang rejects -fstack-clash-protection on aarch64 with -Werror"
+
+  - name: test.test_cext.*.test_build*
+    targets:
+      - ".+-unknown-linux-musl"
+    minimum-python-version: "3.12"
+    reason: "The Ubuntu stdlib runners do not provide the musl-clang compiler recorded in sysconfig; static builds also cannot load extensions"
 
   - name: test.test_cmath.CMathTests.test_polar_errno
     targets:
@@ -442,6 +462,24 @@ expected-failures:
     reason: "sometimes times out - possible test deadlock"
     intermittent: true
 
+  - name: test.test_concurrent_futures.test_interpreter_pool.InterpreterPoolExecutorTest.test_map
+    targets:
+      - ".+-unknown-linux-musl"
+    minimum-python-version: "3.14"
+    maximum-python-version: "3.14"
+    build-option: "freethreaded"
+    reason: "Importing concurrent.futures in a subinterpreter intermittently raises BlockingIOError (EAGAIN); passes on rerun"
+    intermittent: true
+
+  - name: test.test_concurrent_futures.test_process_pool.ProcessPoolForkserverProcessPoolExecutorTest.test_max_tasks_early_shutdown
+    targets:
+      - ".+-unknown-linux-musl"
+    minimum-python-version: "3.13"
+    maximum-python-version: "3.13"
+    build-option: "freethreaded"
+    reason: "A KeyError in the process-pool manager during early shutdown leaves the test waiting on a future until timeout; passes on rerun"
+    intermittent: true
+
   - name: test.test_concurrent_futures.test_shutdown.ProcessPoolForkProcessPoolShutdownTest.test_interpreter_shutdown
     targets:
       - "x86_64-apple-darwin"
@@ -449,12 +487,30 @@ expected-failures:
     build-option: "debug"
     reason: "DeprecationWarning: This process (pid=81234) is multi-threaded, use of fork() may lead to deadlocks in the child.\n  self.pid = os.fork()\n' is not false"
 
+  # Rosetta's extra thread can trigger fork warnings, depending on the host OS.
+  # https://github.com/python/cpython/issues/157870
+  - name: test.test_concurrent_futures.test_shutdown.ProcessPoolForkProcessPoolShutdownTest.test_hang_gh83386
+    targets:
+      - "x86_64-apple-darwin"
+    minimum-python-version: "3.14"
+    build-option: "debug"
+    reason: "fork() emits a DeprecationWarning under Rosetta, but the test expects empty stderr"
+    intermittent: true
+
   - name: test.test_concurrent_futures.test_shutdown.ProcessPoolForkserverProcessPoolShutdownTest.test_interpreter_shutdown
     targets:
       - "x86_64-apple-darwin"
     minimum-python-version: "3.12"
     build-option: "debug"
     reason: "DeprecationWarning: This process (pid=81234) is multi-threaded, use of fork() may lead to deadlocks in the child.\n  self.pid = os.fork()\n' is not false"
+
+  - name: test.test_concurrent_futures.test_shutdown.ProcessPoolForkserverProcessPoolShutdownTest.test_hang_gh83386
+    targets:
+      - "x86_64-apple-darwin"
+    minimum-python-version: "3.14"
+    build-option: "debug"
+    reason: "fork() emits a DeprecationWarning under Rosetta, but the test expects empty stderr"
+    intermittent: true
 
   - name: test.test_coroutines.CAPITest.test_tp_await_1
     targets:
@@ -477,6 +533,32 @@ expected-failures:
     maximum-python-version: "3.12"
     reason: "_testcapi missing"
 
+  - name: test.test_cppext.*.test_build*
+    targets:
+      - "aarch64-unknown-linux-gnu"
+    minimum-python-version: "3.11"
+    reason: "The stdlib runner's Clang rejects -fstack-clash-protection on aarch64 with -Werror"
+
+  - name: test.test_cppext.*.test_build*
+    targets:
+      - ".+-unknown-linux-musl"
+    minimum-python-version: "3.11"
+    reason: "The Ubuntu stdlib runners lack a musl C++ toolchain and libstdc++.so.6; static builds cannot load extensions"
+
+  - name: test.test_cppext.TestCPPExt.test_build_cpp03
+    targets:
+      - ".+-apple-darwin"
+    minimum-python-version: "3.11"
+    maximum-python-version: "3.11"
+    reason: "setuptools rejects the locally built egg's macOS deployment-target tag as incompatible with the host OS"
+
+  - name: test.test_cppext.TestCPPExt.test_build_cpp11
+    targets:
+      - ".+-apple-darwin"
+    minimum-python-version: "3.11"
+    maximum-python-version: "3.11"
+    reason: "setuptools rejects the locally built egg's macOS deployment-target tag as incompatible with the host OS"
+
   - name: test.test_ctypes.test_callbacks.Callbacks.test_i38748_stackCorruption
     targets:
       - "i686-pc-windows-msvc"
@@ -489,12 +571,13 @@ expected-failures:
     minimum-python-version: "3.12"
     reason: "OSError: exception: access violation writing 0x00000005"
 
-  # Looks racy on freethreaded builds.
-  #- name: test.datetimetester.ExtensionModuleTests_Fast.test_concurrent_initialization_subinterpreter
-  #  minimum-python-version: "3.15"
-  #  build-option: "freethreaded"
-  #  reason: "AssertionError: b'aaaaaaa' != b'aaaaaaaa'"
-  #  intermittent: true
+  - name: test.datetimetester.ExtensionModuleTests_Fast.test_concurrent_initialization_subinterpreter
+    targets:
+      - ".+-unknown-linux-musl"
+    minimum-python-version: "3.15"
+    build-option: "freethreaded"
+    reason: "Concurrent subinterpreter initialization sometimes produces seven output bytes instead of eight; passes on rerun"
+    intermittent: true
 
   - name: test.datetimetester.ZoneInfoTest_Fast.test_system_transitions
     targets:
@@ -812,6 +895,14 @@ expected-failures:
   #  reason: "appears to be racy on freethreaded builds"
   #  intermittent: true
 
+  - name: test.test_glob.SymlinkLoopGlobTests.test_selflink
+    targets:
+      - "aarch64-unknown-linux-musl"
+    minimum-python-version: "3.10"
+    maximum-python-version: "3.10"
+    reason: "Recursive glob intermittently omits a path through the symlink loop; passes on rerun"
+    intermittent: true
+
   - name: test.test_httpservers.BaseHTTPServerTestCase.*
     targets:
       - ".+-unknown-linux-musl"
@@ -909,6 +1000,14 @@ expected-failures:
     minimum-python-version: "3.13"
     reason: _testsinglephase shared library expectation
 
+  - name: test.test_import.ImportTests.test_dll_dependency_import
+    targets:
+      - ".+-pc-windows-.+"
+    no-build-option: "debug"
+    # https://github.com/python/cpython/issues/158091
+    reason: "An _d in the temporary directory path makes the test look for sqlite3_d.dll in a release build"
+    intermittent: true
+
   - name: test.test_import.ImportTests.test_from_import_missing_attr_has_name_and_so_path
     targets:
       - ".+-unknown-linux-musl"
@@ -957,6 +1056,13 @@ expected-failures:
     build-option: "static"
     minimum-python-version: "3.15"
     reason: "AttributeError: module '_testmultiphase' has no attribute '__file__'. Did you mean '.__name__' instead of '.__file__'?"
+
+  - name: test.test_import.ModexportTests.test_from_modexport_minimal_slots
+    targets:
+      - ".+-unknown-linux-musl"
+    build-option: "static"
+    minimum-python-version: "3.15"
+    reason: "AttributeError: the built-in _testmultiphase module has no __file__"
 
   - name: test.test_import.ModexportTests.test_from_modexport_null
     targets:
@@ -1036,7 +1142,7 @@ expected-failures:
     targets:
       - ".+-unknown-linux-musl"
     build-option: "static"
-    minimum-python-version: "3.15"
+    minimum-python-version: "3.13"
     reason: "AttributeError: module '_testsinglephase' has no attribute '__file__'. Did you mean '.__name__' instead of '.__file__'?"
 
   - name: test.test_import.SubinterpImportTests.test_python_compat
@@ -1394,6 +1500,20 @@ expected-failures:
     maximum-python-version: "3.12"
     reason: missing _testcapi
 
+  - name: test.test_inspect.test_inspect.TestModuleCLI.test_error_extension
+    targets:
+      - ".+-unknown-linux-musl"
+    build-option: "static"
+    minimum-python-version: "3.15"
+    reason: "The CLI reports that _testcapi cannot be imported instead of reporting an extension without source"
+
+  - name: test.test_inspect.test_inspect.TestModuleCLI.test_get_cli_details_for_extension_module
+    targets:
+      - ".+-unknown-linux-musl"
+    build-option: "static"
+    minimum-python-version: "3.15"
+    reason: "missing _testcapi"
+
   - name: test.test_inspect.test_inspect.TestSignatureObject.test_signature_on_builtins
     targets:
       - ".+-unknown-linux-musl"
@@ -1467,6 +1587,14 @@ expected-failures:
     # Seems to be fixed in 3.14.
     maximum-python-version: "3.13"
     reason: "AssertionError: 0.015625 not less than or equal to 0.0078125"
+    intermittent: true
+
+  - name: test.test_int.IntSubclassStrDigitLimitsTests.test_denial_of_service_prevented_str_to_int
+    minimum-python-version: "3.10"
+    maximum-python-version: "3.13"
+    targets:
+      - ".+-pc-windows-.+"
+    reason: "The inherited timing check can also fail with 0.015625 not less than or equal to 0.0078125"
     intermittent: true
 
   - name: test.test_int.IntSubclassStrDigitLimitsTests.test_int_max_str_digits_is_per_interpreter
@@ -1564,6 +1692,23 @@ expected-failures:
     reason: "test appears racy on freethreaded builds"
     intermittent: true
 
+  - name: test.test_io.CMiscIOTest.test_daemon_threads_shutdown_stderr_deadlock
+    targets:
+      - ".+-unknown-linux-musl"
+    minimum-python-version: "3.13"
+    maximum-python-version: "3.13"
+    build-option: "freethreaded"
+    reason: "The daemon-thread shutdown subprocess can hang while writing stderr until the 300-second timeout; passes on rerun"
+    intermittent: true
+
+  - name: test.test_io.test_general.CMiscIOTest.test_daemon_threads_shutdown_stderr_deadlock
+    targets:
+      - "x86_64.*-unknown-linux-gnu"
+    minimum-python-version: "3.15"
+    build-option: "freethreaded"
+    reason: "The daemon-thread shutdown subprocess can hang while writing stderr until the 300-second timeout; passes on rerun"
+    intermittent: true
+
   - name: test.test_io.CTextIOWrapperTest.test_device_encoding
     targets:
       - ".+-unknown-linux-musl"
@@ -1620,6 +1765,13 @@ expected-failures:
     build-option: "static"
     reason: "AssertionError: '.' != ','"
 
+  - name: test.test_launcher.TestLauncher.test_filter_to_company
+    minimum-python-version: "3.11"
+    targets:
+      - ".+-pc-windows-.+"
+    reason: "py.exe exceeds the test's 10 second timeout under load; passes on rerun"
+    intermittent: true
+
   - name: test.test_locale.TestEnUSCollation.test_strcoll_with_diacritic
     targets:
       - ".+-unknown-linux-musl"
@@ -1645,6 +1797,22 @@ expected-failures:
     minimum-python-version: "3.14"
     build-option: "static"
     reason: "AssertionError: 1 not less than 0"
+
+  - name: test.test_math.MathTests.test_sumprod_stress
+    targets:
+      - ".+-apple-darwin"
+    minimum-python-version: "3.13"
+    build-option: "freethreaded"
+    reason: "CPU-heavy stress test can exceed the 300-second timeout in free-threaded debug builds, especially under Rosetta"
+    intermittent: true
+
+  - name: test.test_math.MathTests.test_sumprod_stress
+    targets:
+      - ".+-unknown-linux-.+"
+    minimum-python-version: "3.12"
+    build-option: "debug"
+    reason: "The CPU-intensive stress test exceeds the 300-second timeout in debug builds, especially with free threading"
+    intermittent: true
 
   # Passes on x86_64_v3 and x86_64_v4 for some reason.
   - name: test.test_math.FMATests.test_fma_zero_result
@@ -1656,12 +1824,19 @@ expected-failures:
 
   - name: test.test_math.FMATests.test_fma_zero_result
     targets:
-      - ".+-unknown-linux-musl"
-    ignore-targets:
-      - "x86_64_v[34]-unknown-linux-musl"
+      - "x86_64(_v2)?-unknown-linux-musl"
     minimum-python-version: "3.14"
     build-option: "static"
     reason: "AssertionError: False is not true : Expected a negative zero, got 0.0"
+
+  # setUp registers a monitoring tool before importing _testcapi. When that
+  # import skips, tearDown never frees the tool and unrelated tests then fail.
+  - name: test.test_monitoring.TestCApiEventGeneration.*
+    targets:
+      - ".+-unknown-linux-musl"
+    minimum-python-version: "3.14"
+    build-option: "static"
+    reason: "Missing _testcapi in setUp leaks the monitoring tool and causes cascading failures"
 
   - name: test.test_multibytecodec.Test_IncrementalEncoder.test_subinterp
     targets:
@@ -1692,6 +1867,21 @@ expected-failures:
     minimum-python-version: "3.15"
     build-option: "static"
     reason: "AssertionError: <built-in function pathconf> didn't raise an OSError with a bad file descriptor"
+
+  - name: test.test_os.TestInvalidFD.test_pathconf_negative_fd_uses_fd_semantics
+    targets:
+      - ".+-unknown-linux-musl"
+    minimum-python-version: "3.13"
+    maximum-python-version: "3.13"
+    reason: "musl pathconf does not raise OSError for a negative file descriptor"
+
+  - name: test.test_os.TestInvalidFD.test_pathconf_negative_fd_uses_fd_semantics
+    targets:
+      - ".+-unknown-linux-musl"
+    minimum-python-version: "3.14"
+    maximum-python-version: "3.14"
+    build-option: "static"
+    reason: "musl pathconf does not raise OSError for a negative file descriptor"
 
   - name: test.test_os.test_os.TestInvalidFD.test_pathconf_negative_fd_uses_fd_semantics
     targets:
@@ -1816,6 +2006,13 @@ expected-failures:
     reason: "timeout due to potential deadlock or similar test bug"
     intermittent: true
 
+  - name: test.test_robotparser.NetworkTestCase.test_read_404
+    minimum-python-version: "3.10"
+    targets:
+      - ".+-pc-windows-.+"
+    reason: "External HTTP request times out with WinError 10060"
+    intermittent: true
+
   - name: test.test_smtplib.DebuggingServerTests.*
     targets:
       - ".+-unknown-linux-musl"
@@ -1906,49 +2103,21 @@ expected-failures:
     reason: ConnectionAbortedError
     intermittent: true
 
-    # These uplink/applink failures should go away once we're patching
-    # OpenSSL correctly following https://github.com/python/cpython/pull/131839.
-    # These pass on aarch64 for reasons unknown.
-
-  - name: test.test_ssl.ContextTests.test_load_dh_params
+  - name: test.test_ssl.TestPostHandshakeAuth.test_pha_required_nocert
     targets:
-      - "i686-pc-windows-.+"
-      - "x86_64-pc-windows-.+"
-    minimum-python-version: "3.12"
-    reason: "OPENSSL_Uplink(00007FFD9EB59C60,08): no OPENSSL_Applink"
+      - ".+-unknown-linux-.+"
+    minimum-python-version: "3.10"
+    maximum-python-version: "3.12"
+    reason: "The server can reset the connection before the client writes HASCERT; passes on rerun"
+    intermittent: true
 
-  - name: test.test_ssl.SSLErrorTests.test_lib_reason
+  - name: test.test_ssl.ThreadedTests.test_wrong_cert_tls13
     targets:
-      - "i686-pc-windows-.+"
-      - "x86_64-pc-windows-.+"
-    minimum-python-version: "3.12"
-    reason: "OPENSSL_Uplink(00007FFD9EB59C60,08): no OPENSSL_Applink"
-
-  #- name: test.test_ssl.SSLErrorTests.test_dh_params
-  #  targets:
-  #    - ".+-pc-windows-.+"
-  #  maximum-python-version: "3.11"
-  #  reason: "OPENSSL_Uplink(00007FFD9EB59C60,08): no OPENSSL_Applink"
-
-  #- name: test.test_ssl.ThreadedTests.test_dh_params
-  #  targets:
-  #    - ".+-pc-windows-.+"
-  #  minimum-python-version: "3.12"
-  #  reason: "OPENSSL_Uplink(00007FFD9EB59C60,08): no OPENSSL_Applink"
-
-  - name: test.test_ssl.TestSSLDebug.test_keylog_defaults
-    targets:
-      - "i686-pc-windows-.+"
-      - "x86_64-pc-windows-.+"
-    minimum-python-version: "3.12"
-    reason: "OPENSSL_Uplink(00007FFD9EB59C60,08): no OPENSSL_Applink"
-
-  - name: test.test_ssl.TestSSLDebug.test_keylog_filename
-    targets:
-      - "i686-pc-windows-.+"
-      - "x86_64-pc-windows-.+"
-    minimum-python-version: "3.12"
-    reason: "OPENSSL_Uplink(00007FFD9EB59C60,08): no OPENSSL_Applink"
+      - ".+-unknown-linux-musl"
+    minimum-python-version: "3.11"
+    maximum-python-version: "3.12"
+    reason: "TLS 1.3 certificate rejection intermittently causes ConnectionResetError in the client write; passes on rerun"
+    intermittent: true
 
   # Looks like a race condition in the test.
   - name: test.test_str.StrTest.test_raiseMemError
@@ -1983,7 +2152,8 @@ expected-failures:
     targets:
       - "aarch64-unknown-linux-musl"
     minimum-python-version: "3.14"
-    no-build-option: "debug"
+    # Static builds pass. Debug builds already skip the harness on 3.14+.
+    no-build-option: "static"
     reason: "AssertionError: Regex didn't match: b'(?i)vfork'..."
 
   - name: test.test_subprocess.ProcessTestCase.test_executable_without_cwd
@@ -2005,33 +2175,6 @@ expected-failures:
     minimum-python-version: "3.11"
     maximum-python-version: "3.11"
     reason: "RecursionError: maximum recursion depth exceeded"
-
-  - name: test.test_sysconfig.TestSysConfig.test_config_vars_depend_on_site_initialization
-    minimum-python-version: "3.12"
-    maximum-python-version: "3.13"
-    targets:
-      - ".+-apple-darwin"
-    reason: crashes
-
-  - name: test.test_sysconfig.TestSysConfig.test_config_vars_recalculation_after_site_initialization
-    minimum-python-version: "3.12"
-    maximum-python-version: "3.13"
-    targets:
-      - ".+-apple-darwin"
-    reason: crashes
-
-  - name: test.test_sysconfig.TestSysConfig.test_paths_depend_on_site_initialization
-    minimum-python-version: "3.12"
-    maximum-python-version: "3.13"
-    targets:
-      - ".+-apple-darwin"
-    reason: crashes
-
-  - name: test.test_sysconfig.TestSysConfig.test_makefile_overwrites_config_vars
-    minimum-python-version: "3.14"
-    targets:
-      - ".+-apple-darwin"
-    reason: PBS behavior differences
 
   - name: test.test_sysconfig.TestSysConfig.test_sysconfigdata_json
     minimum-python-version: "3.14"
@@ -2120,6 +2263,54 @@ expected-failures:
     maximum-python-version: "3.12"
     reason: missing _testcapi
 
+  - name: test.test_tarfile.TestExtractionFilters.test_modes
+    targets:
+      - ".+-apple-darwin"
+    minimum-python-version: "3.11"
+    maximum-python-version: "3.12"
+    reason: "macOS clears the setgid bit: expected ?rwsrwsrwt, got ?rwsrwxrwt"
+
+  - name: test.test_threading.BarrierTests.test_timeout
+    targets:
+      - "x86_64.*-unknown-linux-gnu"
+    minimum-python-version: "3.15"
+    build-option: "freethreaded"
+    reason: "The barrier sometimes completes before the expected BrokenBarrierError under load; passes on rerun"
+    intermittent: true
+
+  - name: test.test_threading.BarrierTests.test_wait_return
+    minimum-python-version: "3.10"
+    targets:
+      - ".+-pc-windows-.+"
+    reason: "BrokenBarrierError under load; passes when rerun in isolation"
+    intermittent: true
+
+  - name: test.test_threading.ConditionTests.test_waitfor_timeout
+    targets:
+      - "aarch64-unknown-linux-musl"
+    minimum-python-version: "3.15"
+    build-option: "freethreaded"
+    reason: "A 0.1-second condition wait sometimes exceeds the test's 1-second upper bound under load"
+    intermittent: true
+
+  - name: test.test_threading.EventTests.test_set_and_clear
+    targets:
+      - "x86_64.*-unknown-linux-gnu"
+    minimum-python-version: "3.14"
+    maximum-python-version: "3.14"
+    build-option: "freethreaded"
+    reason: "Thread cleanup can exceed the 30-second timeout under load; passes on rerun"
+    intermittent: true
+
+  - name: test.test_threading.EventTests.test_set_and_clear
+    targets:
+      - "x86_64-apple-darwin"
+    minimum-python-version: "3.14"
+    maximum-python-version: "3.14"
+    build-option: "freethreaded"
+    reason: "thread cleanup can exceed the 30-second timeout under load with Rosetta"
+    intermittent: true
+
   - name: test.test_threading.SubinterpThreadingTests.test_threads_join
     targets:
       - ".+-unknown-linux-musl"
@@ -2176,6 +2367,23 @@ expected-failures:
       - ".+-unknown-linux-musl"
     maximum-python-version: "3.10"
     reason: "AssertionError: -11 != 0"
+
+  - name: test.test_threading.ThreadingIteratorToolsTests.test_concurrent_tee_supports_concurrent_consumers
+    targets:
+      - ".+-unknown-linux-musl"
+    minimum-python-version: "3.15"
+    build-option: "freethreaded"
+    reason: "Intermittent SIGSEGV while threads consume a shared tee iterator; passes on rerun"
+    intermittent: true
+
+  - name: test.test_threading.ThreadJoinOnShutdown.test_3_join_in_forked_from_thread
+    targets:
+      - ".+-unknown-linux-musl"
+    minimum-python-version: "3.11"
+    maximum-python-version: "3.11"
+    build-option: "debug"
+    reason: "Joining threads after fork can hang until the 300-second timeout; passes on rerun"
+    intermittent: true
 
   - name: test.test_threading.ThreadJoinOnShutdown.test_4_daemon_threads
     minimum-python-version: "3.11"
@@ -2243,6 +2451,14 @@ expected-failures:
       - "x86_64-apple-darwin"
     build-option: "debug"
     reason: "AssertionError: failed spawning forkserver or grandchild"
+
+  - name: test.test_multiprocessing_forkserver.test_misc.MiscTestCase.test_preload_main_large_sys_argv
+    minimum-python-version: "3.13"
+    targets:
+      - "x86_64-apple-darwin"
+    build-option: "debug"
+    reason: "fork() emits a DeprecationWarning under Rosetta, but the test expects empty stderr"
+    intermittent: true
 
   - name: test.test_multiprocessing_fork.*
     maximum-python-version: "3.10"
@@ -2541,13 +2757,6 @@ expected-failures:
     minimum-python-version: "3.15"
     reason: "AssertionError: '/private/var/folders/1r/b8l6nzhj4zdbz5jmj[194 chars]()\n' != ''"
 
-  - name: test.test_regrtest.ArgsTestCase.test_add_python_opts
-    targets:
-      - ".+-unknown-linux-musl"
-    build-option: "static"
-    minimum-python-version: "3.14"
-    reason: "Something related to _testcapi or similar extension"
-
   - name: test.test_regrtest.ArgsTestCase.test_findleaks
     targets:
       - ".+-unknown-linux-musl"
@@ -2574,6 +2783,14 @@ expected-failures:
     reason: "AssertionError: 17777777777 != 2147483647"
     ignore-targets:
       - ".+-pc-windows-.+"
+
+  - name: test.test_typing.GenericTests.test_parameters_deep_recursion
+    targets:
+      - "x86_64.*-unknown-linux-gnu"
+    minimum-python-version: "3.15"
+    build-option: "pgo"
+    no-build-option: "freethreaded"
+    reason: "The optimized build does not raise the RecursionError expected during __parameter__ calculation"
 
   - name: test.test_unicode.UnicodeTest.test_formatting_c_limits
     targets:
@@ -2629,6 +2846,45 @@ expected-failures:
     build-option: "debug"
     reason: "segfault"
 
+  # The external FTP server can reject the CI runner's data connection with
+  # "425 Security: Bad IP connecting." HTTP tests in this module still run.
+  - name: test.test_urllib2net.OtherNetworkTests.test_ftp
+    targets:
+      - ".+-apple-darwin"
+    reason: "Almost always fails, likely due to macOS runner network setup"
+    intermittent: true
+
+  - name: test.test_urllib2net.OtherNetworkTests.test_ftp_no_leak
+    targets:
+      - ".+-apple-darwin"
+    minimum-python-version: "3.13"
+    reason: "Almost always fails, likely due to macOS runner network setup"
+    intermittent: true
+
+  - name: test.test_urllib2net.TimeoutTest.test_ftp_basic
+    targets:
+      - ".+-apple-darwin"
+    reason: "Almost always fails, likely due to macOS runner network setup"
+    intermittent: true
+
+  - name: test.test_urllib2net.TimeoutTest.test_ftp_default_timeout
+    targets:
+      - ".+-apple-darwin"
+    reason: "Almost always fails, likely due to macOS runner network setup"
+    intermittent: true
+
+  - name: test.test_urllib2net.TimeoutTest.test_ftp_no_timeout
+    targets:
+      - ".+-apple-darwin"
+    reason: "Almost always fails, likely due to macOS runner network setup"
+    intermittent: true
+
+  - name: test.test_urllib2net.TimeoutTest.test_ftp_timeout
+    targets:
+      - ".+-apple-darwin"
+    reason: "Almost always fails, likely due to macOS runner network setup"
+    intermittent: true
+
   - name: test.test_userstring.UserStringTest.test_formatting_c_limits
     targets:
       - ".+-unknown-linux-musl"
@@ -2636,97 +2892,50 @@ expected-failures:
     maximum-python-version: "3.10"
     reason: "missing _testcapi"
 
-  - name: test.test_venv.BasicTest.test_executable
-    targets:
-      - ".+-apple-darwin"
-    reason: crashes
-
-  - name: test.test_venv.BasicTest.test_macos_env
-    targets:
-      - ".+-apple-darwin"
-    reason: crashes
-
-  - name: test.test_venv.BasicTest.test_multiprocessing
-    targets:
-      - ".+-apple-darwin"
-    reason: crashes
-
-  - name: test.test_venv.BasicTest.test_multiprocessing_recursion
+  - name: test.test_venv.BasicTest.test_prefixes
     minimum-python-version: "3.11"
     targets:
       - ".+-apple-darwin"
-    reason: crashes
-
-  - name: test.test_venv.BasicTest.test_prefixes
-    targets:
-      - ".+-apple-darwin"
-    reason: crashes
-
-  - name: test.test_venv.BasicTest.test_special_chars_bash
-    targets:
-      - ".+-apple-darwin"
-    reason: crashes
-
-  - name: test.test_venv.BasicTest.test_special_chars_csh
-    targets:
-      - ".+-apple-darwin"
-    reason: crashes
+    reason: "base_prefix compares /tmp with the resolved /private/tmp path"
+    intermittent: true
 
   - name: test.test_venv.BasicTest.test_sysconfig_symlinks
     targets:
       - ".+-apple-darwin"
     minimum-python-version: "3.11"
     maximum-python-version: "3.13"
-    reason: BytesWarning
+    reason: "symlinked distribution paths differ; formatting the failed assertion raises BytesWarning"
+    intermittent: true
 
   - name: test.test_venv.BasicTest.test_sysconfig
     minimum-python-version: "3.11"
     targets:
       - ".+-apple-darwin"
-    reason: crashes
+    reason: "sysconfig paths differ when the distribution path contains symlinks"
+    intermittent: true
 
   - name: test.test_venv.BasicTest.test_sysconfig
     minimum-python-version: "3.13"
+    maximum-python-version: "3.14"
     targets:
       - ".+-pc-windows-.+"
     build-option: "freethreaded"
-    reason: "AssertionError: 3.14t missing suffix - likely PBS quirk"
+    reason: "venv reports the versioned free-threaded base executable instead of its unversioned alias"
 
   - name: test.test_venv.BasicTest.test_venvwlauncher
     minimum-python-version: "3.13"
+    maximum-python-version: "3.14"
     targets:
       - ".+-pc-windows-.+"
     build-option: "freethreaded"
-    reason: "AssertionError: 3.14t missing suffix - likely PBS quirk"
-
-  - name: test.test_venv.BasicTest.test_zippath_from_non_installed_posix
-    minimum-python-version: "3.11"
-    targets:
-      - ".+-apple-darwin"
-    reason: crashes
-
-  - name: test.test_venv.EnsurePipTest.test_explicit_no_pip
-    targets:
-      - ".+-apple-darwin"
-    reason: PBS installs pip
-
-  - name: test.test_venv.EnsurePipTest.test_no_pip_by_default
-    targets:
-      - ".+-apple-darwin"
-    reason: PBS installs pip
-
-  - name: test.test_venv.EnsurePipTest.test_with_pip
-    targets:
-      - ".+-apple-darwin"
-    maximum-python-version: "3.10"
-    reason: logic bug?
+    reason: "venv reports the versioned free-threaded base executable instead of its unversioned alias"
 
   - name: test.test_venv.EnsurePipTest.test_with_pip
     targets:
       - ".+-unknown-linux-musl"
-    maximum-python-version: "3.10"
+    maximum-python-version: "3.11"
     build-option: "static"
-    reason: "TBD"
+    reason: "Bundled pip calls ctypes.CDLL(None) while detecting libc, but static musl builds do not support dynamic loading"
 
   - name: test.test_weakref.ReferencesTestCase.test_cfunction
     targets:
@@ -2735,6 +2944,36 @@ expected-failures:
     maximum-python-version: "3.12"
     reason: "missing _testcapi"
 
+  - name: test.test_wmi.WmiTests.test_wmi_query_overflow
+    minimum-python-version: "3.12"
+    targets:
+      - ".+-pc-windows-.+"
+    reason: "The CIM_DataFile query can exceed the stdlib harness timeout on Windows CI"
+    intermittent: true
+
+  - name: test.test_zipimport.CompressedZipImportTestCase.testZip64LargeFile
+    minimum-python-version: "3.13"
+    # Renamed to DeflateCompressedZipImportTestCase in Python 3.15.
+    maximum-python-version: "3.14"
+    targets:
+      - ".+-pc-windows-.+"
+    reason: "The large ZIP64 file test can exceed the 300 second timeout"
+    intermittent: true
+
+  - name: test.test_zipimport.DeflateCompressedZipImportTestCase.testZip64LargeFile
+    minimum-python-version: "3.15"
+    targets:
+      - ".+-pc-windows-.+"
+    reason: "The large ZIP64 file test can exceed the 300 second timeout"
+    intermittent: true
+
+  - name: test.test_zipimport.UncompressedZipImportTestCase.testZip64LargeFile
+    minimum-python-version: "3.13"
+    targets:
+      - ".+-pc-windows-.+"
+    reason: "The large ZIP64 file test can exceed the 300 second timeout"
+    intermittent: true
+
   - name: test.test__xxinterpchannels.ChannelTests.test_send_recv_different_interpreters_and_threads
     minimum-python-version: "3.12"
     maximum-python-version: "3.12"
@@ -2742,6 +2981,7 @@ expected-failures:
       - "aarch64-unknown-linux-musl"
     build-option: "debug"
     reason: "segfault"
+    intermittent: true
 
   - name: test.test__xxsubinterpreters.ChannelTests.test_send_recv_different_interpreters_and_threads
     maximum-python-version: "3.10"
@@ -2777,3 +3017,15 @@ expected-failures:
     reason: "segfault"
     no-build-option: "static"
     intermittent: true
+
+  - name: tkinter.test.test_ttk.test_widgets.NotebookTest.test_configure_height
+    targets:
+      - ".+-pc-windows-.+"
+    maximum-python-version: "3.11"
+    reason: "Tk 8.6.15 reports 'bad screen distance' instead of the 'expected integer' error expected by older tests"
+
+  - name: tkinter.test.test_ttk.test_widgets.NotebookTest.test_configure_width
+    targets:
+      - ".+-pc-windows-.+"
+    maximum-python-version: "3.11"
+    reason: "Tk 8.6.15 reports 'bad screen distance' instead of the 'expected integer' error expected by older tests"

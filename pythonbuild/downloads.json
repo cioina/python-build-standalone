@@ -42,10 +42,10 @@
         "license_file": "LICENSE.bzip2.txt"
     },
     "cpython-3.10": {
-        "url": "https://www.python.org/ftp/python/3.10.21/Python-3.10.21.tar.xz",
-        "size": 19896516,
-        "sha256": "a0da1e72132e950154eca0f6f47d5db828454700de20e5113667940d81e0db04",
-        "version": "3.10.21",
+        "url": "https://www.python.org/ftp/python/3.10.22/Python-3.10.22.tar.xz",
+        "size": 19907500,
+        "sha256": "c61fe9b1a1a7ec2a0b0388e664187c378a5325a89e3606d220abf5bdfccb2543",
+        "version": "3.10.22",
         "licenses": [
             "Python-2.0",
             "CNRI-Python"
@@ -54,10 +54,10 @@
         "python_tag": "cp310"
     },
     "cpython-3.11": {
-        "url": "https://www.python.org/ftp/python/3.11.16/Python-3.11.16.tar.xz",
-        "size": 20328716,
-        "sha256": "91bcdebfdde239a003ae93738a7fce0f9230fee5c4bc2b86f6e6e8c6f98aabe8",
-        "version": "3.11.16",
+        "url": "https://www.python.org/ftp/python/3.11.17/Python-3.11.17.tar.xz",
+        "size": 20352864,
+        "sha256": "bfb74ad39efae27cda510f134ab408e00f9992c56851cfc0b1cdb5646da11599",
+        "version": "3.11.17",
         "licenses": [
             "Python-2.0",
             "CNRI-Python"
@@ -66,10 +66,10 @@
         "python_tag": "cp311"
     },
     "cpython-3.12": {
-        "url": "https://www.python.org/ftp/python/3.12.14/Python-3.12.14.tar.xz",
-        "size": 20820300,
-        "sha256": "5c8462af5790baf43a321a1559dbe0db06d1be4300fb85fb53c40060668e548a",
-        "version": "3.12.14",
+        "url": "https://www.python.org/ftp/python/3.12.15/Python-3.12.15.tar.xz",
+        "size": 20829824,
+        "sha256": "c2c4321961fab0fb999d66e0cecf521c2ab3994c7992873ea99e306c1094fd5a",
+        "version": "3.12.15",
         "licenses": [
             "Python-2.0",
             "CNRI-Python"
@@ -78,10 +78,10 @@
         "python_tag": "cp312"
     },
     "cpython-3.13": {
-        "url": "https://www.python.org/ftp/python/3.13.15/Python-3.13.15.tar.xz",
-        "size": 23160540,
-        "sha256": "1e66a7945a48390ee4c2a4268a0e4185884059a13c4aab6d148aa208deea4a76",
-        "version": "3.13.15",
+        "url": "https://www.python.org/ftp/python/3.13.16/Python-3.13.16.tar.xz",
+        "size": 23225704,
+        "sha256": "f4b1bfb3c79b5bb11b8d228a12504163b4c0dab4d679828d8f5f26b6cb6ab35d",
+        "version": "3.13.16",
         "licenses": [
             "Python-2.0",
             "CNRI-Python"
@@ -90,10 +90,10 @@
         "python_tag": "cp313"
     },
     "cpython-3.14": {
-        "url": "https://www.python.org/ftp/python/3.14.7/Python-3.14.7.tar.xz",
-        "size": 24053924,
-        "sha256": "3b48dac8fb59f62eaa67ac83c1eb12bda1b7a08406dd286e252c11a66be27f81",
-        "version": "3.14.7",
+        "url": "https://www.python.org/ftp/python/3.14.8/Python-3.14.8.tar.xz",
+        "size": 24130644,
+        "sha256": "c2215904f02b175596dc49351585104f4bc20341e1c47378b26a2c274360ce73",
+        "version": "3.14.8",
         "licenses": [
             "Python-2.0",
             "CNRI-Python"
@@ -102,10 +102,10 @@
         "python_tag": "cp314"
     },
     "cpython-3.15": {
-        "url": "https://www.python.org/ftp/python/3.15.0/Python-3.15.0rc2.tar.xz",
-        "size": 35544464,
-        "sha256": "8d93af5eaaaea5adfd41bd786a7ba3f03f2ad1ab57c6a65e0b963deab91d5ad7",
-        "version": "3.15.0rc2",
+        "url": "https://www.python.org/ftp/python/3.15.0/Python-3.15.0rc3.tar.xz",
+        "size": 35587476,
+        "sha256": "506630aa66d5441188f34df22c0760bfe87fc92212630493ebc9ff3b3a7a1d49",
+        "version": "3.15.0rc3",
         "licenses": [
             "Python-2.0",
             "CNRI-Python"
@@ -114,10 +114,10 @@
         "python_tag": "cp315"
     },
     "expat": {
-        "url": "https://github.com/libexpat/libexpat/releases/download/R_2_8_4/expat-2.8.4.tar.xz",
-        "size": 519688,
-        "sha256": "656ae1cc8da3b4ea513bb4e254f33e6243938084c0ec6239da873376b09985a7",
-        "version": "2.8.4",
+        "url": "https://github.com/libexpat/libexpat/releases/download/R_2_8_5/expat-2.8.5.tar.xz",
+        "size": 528380,
+        "sha256": "1e727b8933ec51a77a9a9d9afcf8e688bce45d907c13e36ab7393fe36e703182",
+        "version": "2.8.5",
         "library_names": [
             "expat"
         ],
@@ -305,10 +305,10 @@
     },
     "openssl-3.5": {
         "_comment": "Remember to update OPENSSL_VERSION_INFO in pythonbuild/disttests/ whenever upgrading.",
-        "url": "https://github.com/openssl/openssl/releases/download/openssl-3.5.8/openssl-3.5.8.tar.gz",
-        "size": 53213818,
-        "sha256": "a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2",
-        "version": "3.5.8",
+        "url": "https://github.com/openssl/openssl/releases/download/openssl-3.5.9/openssl-3.5.9.tar.gz",
+        "size": 53279637,
+        "sha256": "603f5602e2eef00d77fbd429d34dcd5822bb301757a1bc9cdb24c670f1eb859a",
+        "version": "3.5.9",
         "library_names": [
             "crypto",
             "ssl"
@@ -410,47 +410,22 @@
         "size": 15632291,
         "sha256": "e7aaa6417b7c2301ecd876307cced7e5bc4575a0b96e66dd08fcb6ab0d5d87a8",
         "version": "9.0.4",
-        "git_commit": "907f3f4de820cb74fc8fb4431a39beae4c690915"
-    },
-    "tk-windows-bin-8614": {
-        "url": "https://github.com/python/cpython-bin-deps/archive/c624cc881bd0e5071dec9de4b120cbe9985d8c14.tar.gz",
-        "size": 9497943,
-        "sha256": "9b8e77d55f40ceaedd140ccca0daa804f0d43346d5abfcead9b547b5590f82f8",
-        "version": "8.6.14",
-        "git_commit": "c624cc881bd0e5071dec9de4b120cbe9985d8c14"
-    },
-    "tcl-8612": {
-        "url": "https://prdownloads.sourceforge.net/tcl/tcl8.6.12-src.tar.gz",
-        "size": 10353486,
-        "sha256": "26c995dd0f167e48b11961d891ee555f680c175f7173ff8cb829f4ebcde4c1a6",
-        "version": "8.6.12",
-        "library_names": [
-            "tcl8.6"
-        ],
+        "git_commit": "907f3f4de820cb74fc8fb4431a39beae4c690915",
         "licenses": [
             "TCL"
         ],
         "license_file": "LICENSE.tcl.txt"
     },
-    "tk-8612": {
-        "url": "https://prdownloads.sourceforge.net/tcl/tk8.6.12-src.tar.gz",
-        "size": 4515393,
-        "sha256": "12395c1f3fcb6bed2938689f797ea3cdf41ed5cb6c4766eec8ac949560310630",
-        "version": "8.6.12",
-        "library_names": [
-            "tk8.6"
-        ],
+    "tk-windows-bin-8615": {
+        "url": "https://github.com/python/cpython-bin-deps/archive/c807be2b19bafc06767b2ed8afec4d5f9a9553b2.tar.gz",
+        "size": 10421420,
+        "sha256": "3c661a23751be04d901ce96611c325f88e970273dcbf5394982c1745100a6d8c",
+        "version": "8.6.15",
+        "git_commit": "c807be2b19bafc06767b2ed8afec4d5f9a9553b2",
         "licenses": [
             "TCL"
         ],
         "license_file": "LICENSE.tcl.txt"
-    },
-    "tk-windows-bin-8612": {
-        "url": "https://github.com/python/cpython-bin-deps/archive/e3c3e9a2856124aa32b608632a52742d479eb7a9.tar.gz",
-        "size": 6787654,
-        "sha256": "01ad9c663659224e075d487cbc33ea2fed7a225593965b79bed92ca7f79b676f",
-        "version": "8.6.12",
-        "git_commit": "e3c3e9a2856124aa32b608632a52742d479eb7a9"
     },
     "uuid": {
         "url": "https://sourceforge.net/projects/libuuid/files/libuuid-1.0.3.tar.gz",
@@ -491,10 +466,10 @@
     },
     "xz": {
         "_comment": "IMPORTANT: xz 5.6.0 was released with a backdoor (CVE-2024-3094). This has been resolved. Be cautious before taking any xz upgrades given this past behavior. liblzma is licensed as 0BSD. Other parts of code have different licenses. But we only use liblzma.",
-        "url": "https://github.com/tukaani-project/xz/releases/download/v5.8.3/xz-5.8.3.tar.gz",
-        "size": 2771455,
-        "sha256": "3d3a1b973af218114f4f889bbaa2f4c037deaae0c8e815eec381c3d546b974a0",
-        "version": "5.8.3",
+        "url": "https://github.com/tukaani-project/xz/releases/download/v5.8.4/xz-5.8.4.tar.gz",
+        "size": 2799797,
+        "sha256": "0014c7886930454fe8bd4228665b51af55eeae560ea135c9c4cd33f55b2591d9",
+        "version": "5.8.4",
         "library_names": [
             "lzma"
         ],

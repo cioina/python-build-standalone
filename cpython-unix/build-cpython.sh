@@ -194,7 +194,15 @@ fi
 # Code that runs at ctypes module import time does not work with
 # non-dynamic binaries. Patch Python to work around this.
 # See https://bugs.python.org/issue37060.
-patch -p1 -i "${ROOT}/patch-ctypes-static-binary.patch"
+# Merged upstream in 3.13+
+# https://github.com/python/cpython/pull/153890
+if [[ -n "${PYTHON_MEETS_MAXIMUM_VERSION_3_12}" ]]; then
+    patch -p1 -i "${ROOT}/patch-ctypes-static-binary.patch"
+fi
+# TODO(jjh) remove when 3.15.0 is released
+if [ "${PYTHON_MAJMIN_VERSION}" = 3.15 ]; then
+    patch -p1 -i "${ROOT}/patch-ctypes-static-binary.patch"
+fi
 
 # We build against libedit instead of readline in all environments.
 #
@@ -719,9 +727,10 @@ fi
 # The patch declares sem_clockwait as a weak symbol and checks at runtime.
 if [[ "${PYBUILD_PLATFORM}" != macos* ]]; then
     if [ -n "${PYTHON_MEETS_MINIMUM_VERSION_3_15}" ]; then
-        patch -p1 -i ${ROOT}/patch-sem-clockwait-weak-3.15.patch
+        patch -p1 -i ${ROOT}/patch-sem-clockwait-weak-parking-lot.patch
     elif [ -n "${PYTHON_MEETS_MINIMUM_VERSION_3_13}" ]; then
         patch -p1 -i ${ROOT}/patch-sem-clockwait-weak-3.13.patch
+        patch -p1 -i ${ROOT}/patch-sem-clockwait-weak-parking-lot.patch
     elif [ -n "${PYTHON_MEETS_MINIMUM_VERSION_3_12}" ]; then
         patch -p1 -i ${ROOT}/patch-sem-clockwait-weak-3.12.patch
     elif [ -n "${PYTHON_MEETS_MINIMUM_VERSION_3_11}" ]; then
@@ -1312,6 +1321,11 @@ fi
 ln -sf \
     "$(readlink "${ROOT}/out/python/install/bin/python3")" \
     "${ROOT}/out/python/install/bin/python"
+
+# Add a matching alias for the manpage.
+ln -sf \
+    "python${PYTHON_MAJMIN_VERSION}.1" \
+    "${ROOT}/out/python/install/share/man/man1/python.1"
 
 # Fixup shebangs in Python scripts to reference the local python interpreter.
 cat > "${ROOT}/fix_shebangs.py" << EOF
