@@ -47,7 +47,9 @@ def current_host_platform() -> str:
         if machine == "arm64":
             return "macos_arm64"
         elif machine == "x86_64":
-            return "macos_x86_64"
+            raise Exception(
+                "macOS builds require an Apple Silicon host running native arm64 Python"
+            )
         else:
             raise Exception(f"unhanded macOS machine type: {machine}")
     elif sys.platform == "win32":
@@ -75,8 +77,6 @@ def default_target_triple() -> str:
         return "aarch64-unknown-linux-gnu"
     elif host == "macos_arm64":
         return "aarch64-apple-darwin"
-    elif host == "macos_x86_64":
-        return "x86_64-apple-darwin"
     elif host == "windows_x86":
         return "i686-pc-windows-msvc"
     elif host == "windows_x86_64":
@@ -99,10 +99,10 @@ def get_target_settings(yaml_path: pathlib.Path, target: str):
 
 
 def docker_image_names(settings) -> dict[str, str]:
-    """Select the images used to build dependencies and GCC-hosted tools."""
+    """Select the images used to build dependencies and host toolchains."""
     suffix = settings.get("docker_image_suffix", "")
-    # Cross builds share the bare GCC image for their host tools.
-    gcc_suffix = "" if suffix.startswith(".cross") else suffix
+    # Cross builds run on x86-64 and use its native image for host tools.
+    gcc_suffix = ".debian13-x86_64" if suffix.startswith(".cross") else suffix
     return {"build": f"build{suffix}", "gcc": f"gcc{gcc_suffix}"}
 
 
@@ -273,7 +273,14 @@ def write_target_settings(targets, dest_path: pathlib.Path):
     for triple, settings in targets.items():
         payload = {}
 
-        for key in ("host_cc", "host_cxx", "target_cc", "target_cflags"):
+        for key in (
+            "host_cc",
+            "host_cxx",
+            "host_ldflags",
+            "target_cc",
+            "target_cflags",
+            "target_ldflags",
+        ):
             payload[key] = settings.get(key)
 
         serialized_payload = json.dumps(payload, indent=4).encode("utf-8")
@@ -506,15 +513,28 @@ def clang_toolchain(host_platform: str, target_triple: str) -> str:
         return "llvm-aarch64-linux"
     elif host_platform == "macos_arm64":
         return "llvm-aarch64-macos"
-    elif host_platform == "macos_x86_64":
-        return "llvm-x86_64-macos"
     else:
         raise Exception("unhandled host platform")
 
 
 def compress_python_archive(
-    source_path: pathlib.Path, dist_path: pathlib.Path, basename: str
-):
+    source_path: pathlib.Path,
+    dist_path: pathlib.Path,
+    basename: str,
+    *,
+    compression: str = "small",
+) -> pathlib.Path:
+    if compression == "fast":
+        params = zstandard.ZstdCompressionParameters.from_level(
+            3, window_log=27, enable_ldm=True
+        )
+    elif compression == "small":
+        params = zstandard.ZstdCompressionParameters.from_level(
+            22, strategy=zstandard.STRATEGY_BTULTRA2
+        )
+    else:
+        raise ValueError(f"unknown archive compression profile: {compression}")
+
     dest_path = dist_path / ("%s.tar.zst" % basename)
     temp_path = dist_path / ("%s.tar.zst.tmp" % basename)
 
@@ -522,9 +542,6 @@ def compress_python_archive(
 
     try:
         with source_path.open("rb") as ifh, temp_path.open("wb") as ofh:
-            params = zstandard.ZstdCompressionParameters.from_level(
-                22, strategy=zstandard.STRATEGY_BTULTRA2
-            )
             cctx = zstandard.ZstdCompressor(compression_params=params)
             cctx.copy_stream(ifh, ofh, source_path.stat().st_size)
 

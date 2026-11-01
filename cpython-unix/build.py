@@ -70,7 +70,7 @@ LINUX_ALLOW_SYSTEM_LIBRARIES = {
     "rt",
     "util",
 }
-MACOS_ALLOW_SYSTEM_LIBRARIES = {"dl", "m", "pthread"}
+MACOS_ALLOW_SYSTEM_LIBRARIES = {"dl", "iconv", "m", "pthread"}
 MACOS_ALLOW_FRAMEWORKS = {"CoreFoundation"}
 
 
@@ -100,7 +100,7 @@ def add_target_env(env, build_platform, target_triple, build_env, build_options)
     extra_target_cflags += list(settings.get("target_cflags", []))
     extra_target_ldflags = list(settings.get("target_ldflags", []))
     extra_host_cflags = []
-    extra_host_ldflags = []
+    extra_host_ldflags = list(settings.get("host_ldflags", []))
 
     # aarch64 libgcc is built against glibc and initializes LSE atomics using
     # __getauxval, which musl does not export.
@@ -251,10 +251,6 @@ def toolchain_archive_path(package_name, host_platform):
     return BUILD / basename
 
 
-def install_binutils(platform):
-    return not platform.startswith("macos_")
-
-
 def simple_build(
     settings,
     client,
@@ -276,11 +272,10 @@ def simple_build(
                 BUILD,
                 host_platform,
                 target_triple,
-                binutils_image=docker_image_names(settings)["gcc"],
-                binutils=install_binutils(host_platform),
                 clang=True,
                 musl="musl" in target_triple,
                 static="static" in build_options,
+                linux_llvm_setup_script=SUPPORT / "setup-llvm-aliases.sh",
             )
 
         for a in extra_archives or []:
@@ -320,26 +315,6 @@ def simple_build(
         build_env.get_tools_archive(dest_archive, tools_path)
 
 
-def build_binutils(client, image, dest_archive):
-    """Build binutils in the Docker image."""
-    archive = download_entry("binutils", DOWNLOADS_PATH)
-
-    with build_environment(client, image) as build_env:
-        build_env.copy_file(archive)
-        build_env.copy_file(SUPPORT / "build-binutils.sh")
-
-        env = {"BINUTILS_VERSION": DOWNLOADS["binutils"]["version"]}
-
-        add_env_common(env)
-
-        build_env.run(
-            "build-binutils.sh",
-            environment=env,
-        )
-
-        build_env.get_tools_archive(dest_archive, "host")
-
-
 def materialize_clang(host_platform: str, target_triple: str):
     entry = clang_toolchain(host_platform, target_triple)
     tar_zst = download_entry(entry, DOWNLOADS_PATH)
@@ -356,9 +331,7 @@ def materialize_clang(host_platform: str, target_triple: str):
             dctx.copy_stream(ifh, ofh)
 
 
-def build_musl(
-    settings, client, image, host_platform: str, target_triple: str, build_options
-):
+def build_musl(client, image, host_platform: str, target_triple: str, build_options):
     static = "static" in build_options
     musl = "musl-static" if static else "musl"
     musl_archive = download_entry(musl, DOWNLOADS_PATH)
@@ -368,13 +341,14 @@ def build_musl(
             BUILD,
             host_platform,
             target_triple,
-            binutils_image=docker_image_names(settings)["gcc"],
-            binutils=True,
             clang=True,
             static=False,
+            linux_llvm_setup_script=SUPPORT / "setup-llvm-aliases.sh",
         )
         build_env.copy_file(musl_archive)
         build_env.copy_file(SUPPORT / "build-musl.sh")
+        for patch in SUPPORT.glob("patch-musl-CVE-*.patch"):
+            build_env.copy_file(patch)
 
         env = {
             "MUSL_VERSION": DOWNLOADS[musl]["version"],
@@ -400,16 +374,17 @@ def build_libedit(
                 BUILD,
                 host_platform,
                 target_triple,
-                binutils_image=docker_image_names(settings)["gcc"],
-                binutils=install_binutils(host_platform),
                 clang=True,
                 musl="musl" in target_triple,
                 static="static" in build_options,
+                linux_llvm_setup_script=SUPPORT / "setup-llvm-aliases.sh",
             )
 
-        build_env.install_artifact_archive(
-            BUILD, "ncurses", target_triple, build_options
-        )
+        for package in ("autoconf", "m4", "ncurses"):
+            build_env.install_artifact_archive(
+                BUILD, package, target_triple, build_options
+            )
+
         build_env.copy_file(libedit_archive)
         build_env.copy_file(SUPPORT / "build-libedit.sh")
 
@@ -453,10 +428,9 @@ def build_cpython_host(
             BUILD,
             host_platform,
             target_triple,
-            binutils_image=docker_image_names(settings)["gcc"],
-            binutils=install_binutils(host_platform),
-            clang=True,
+            clang=bool(settings.get("needs_toolchain")),
             static="static" in build_options,
+            linux_llvm_setup_script=SUPPORT / "setup-llvm-aliases.sh",
         )
 
         build_env.copy_file(archive)
@@ -482,7 +456,7 @@ def build_cpython_host(
 
         # Set environment variables allowing convenient testing for Python
         # version ranges.
-        for v in ("3.10", "3.11", "3.12", "3.13", "3.14", "3.15"):
+        for v in ("3.11", "3.12", "3.13", "3.14", "3.15", "3.16"):
             normal_version = v.replace(".", "_")
 
             if meets_python_minimum_version(python_version, v):
@@ -562,11 +536,7 @@ def python_build_info(
 
     # Determine allowed libraries on Linux
     libs = extra_metadata["python_config_vars"].get("LIBS", "").split()
-    mips = target_triple.split("-")[0] in {"mips", "mipsel"}
     linux_allowed_system_libraries = LINUX_ALLOW_SYSTEM_LIBRARIES.copy()
-    if mips and version == "3.13":
-        # See https://github.com/astral-sh/python-build-standalone/issues/410
-        linux_allowed_system_libraries.add("atomic")
     riscv = target_triple.split("-")[0] in {"riscv64"}
     if riscv:
         # On older GCC versions, RISC-V sub-word atomic operations require a
@@ -799,16 +769,14 @@ def build_cpython(
                 BUILD,
                 host_platform,
                 target_triple,
-                binutils_image=docker_image_names(settings)["gcc"],
-                binutils=install_binutils(host_platform),
                 clang=True,
                 musl="musl" in target_triple,
                 static="static" in build_options,
+                linux_llvm_setup_script=SUPPORT / "setup-llvm-aliases.sh",
             )
 
         packages = target_needs(TARGETS_CONFIG, target_triple)
         # Toolchain packages are handled specially.
-        packages.discard("binutils")
         packages.discard("musl")
 
         for p in sorted(packages):
@@ -878,7 +846,7 @@ def build_cpython(
 
         # Set environment variables allowing convenient testing for Python
         # version ranges.
-        for v in ("3.10", "3.11", "3.12", "3.13", "3.14", "3.15"):
+        for v in ("3.11", "3.12", "3.13", "3.14", "3.15", "3.16"):
             normal_version = v.replace(".", "_")
 
             if meets_python_minimum_version(python_version, v):
@@ -1174,21 +1142,13 @@ def main():
 
             build_docker_image(client, image_data, BUILD, image_name, host_platform)
 
-        elif action == "binutils":
-            build_binutils(
-                client,
-                get_image(client, ROOT, BUILD, docker_image, host_platform),
-                dest_archive,
-            )
-
         elif action == "clang":
             materialize_clang(host_platform, target_triple)
 
         elif action == "musl":
             build_musl(
-                settings,
                 client,
-                get_image(client, ROOT, BUILD, docker_image, host_platform),
+                get_image(client, BUILD, docker_image, host_platform),
                 host_platform,
                 target_triple,
                 build_options,
@@ -1198,7 +1158,7 @@ def main():
             simple_build(
                 settings,
                 client,
-                get_image(client, ROOT, BUILD, docker_image, host_platform),
+                get_image(client, BUILD, docker_image, host_platform),
                 action,
                 host_platform=host_platform,
                 target_triple=target_triple,
@@ -1212,7 +1172,7 @@ def main():
             build_libedit(
                 settings,
                 client,
-                get_image(client, ROOT, BUILD, docker_image, host_platform),
+                get_image(client, BUILD, docker_image, host_platform),
                 host_platform=host_platform,
                 target_triple=target_triple,
                 build_options=build_options,
@@ -1250,7 +1210,7 @@ def main():
             simple_build(
                 settings,
                 client,
-                get_image(client, ROOT, BUILD, docker_image, host_platform),
+                get_image(client, BUILD, docker_image, host_platform),
                 action,
                 host_platform=host_platform,
                 target_triple=target_triple,
@@ -1264,7 +1224,7 @@ def main():
             simple_build(
                 settings,
                 client,
-                get_image(client, ROOT, BUILD, docker_image, host_platform),
+                get_image(client, BUILD, docker_image, host_platform),
                 action,
                 host_platform=host_platform,
                 target_triple=target_triple,
@@ -1284,7 +1244,7 @@ def main():
             simple_build(
                 settings,
                 client,
-                get_image(client, ROOT, BUILD, docker_image, host_platform),
+                get_image(client, BUILD, docker_image, host_platform),
                 action,
                 host_platform=host_platform,
                 target_triple=target_triple,
@@ -1297,7 +1257,7 @@ def main():
             simple_build(
                 settings,
                 client,
-                get_image(client, ROOT, BUILD, docker_image, host_platform),
+                get_image(client, BUILD, docker_image, host_platform),
                 action,
                 host_platform=host_platform,
                 target_triple=target_triple,
@@ -1310,7 +1270,7 @@ def main():
             simple_build(
                 settings,
                 client,
-                get_image(client, ROOT, BUILD, docker_image, host_platform),
+                get_image(client, BUILD, docker_image, host_platform),
                 action,
                 host_platform=host_platform,
                 target_triple=target_triple,
@@ -1334,7 +1294,7 @@ def main():
             simple_build(
                 settings,
                 client,
-                get_image(client, ROOT, BUILD, docker_image, host_platform),
+                get_image(client, BUILD, docker_image, host_platform),
                 action,
                 host_platform=host_platform,
                 target_triple=target_triple,
@@ -1353,7 +1313,7 @@ def main():
             build_cpython_host(
                 settings,
                 client,
-                get_image(client, ROOT, BUILD, docker_image, host_platform),
+                get_image(client, BUILD, docker_image, host_platform),
                 entry,
                 host_platform=host_platform,
                 target_triple=target_triple,
@@ -1364,17 +1324,17 @@ def main():
             )
 
         elif action in (
-            "cpython-3.10",
             "cpython-3.11",
             "cpython-3.12",
             "cpython-3.13",
             "cpython-3.14",
             "cpython-3.15",
+            "cpython-3.16",
         ):
             build_cpython(
                 settings,
                 client,
-                get_image(client, ROOT, BUILD, docker_image, host_platform),
+                get_image(client, BUILD, docker_image, host_platform),
                 host_platform=host_platform,
                 target_triple=target_triple,
                 build_options=build_options,

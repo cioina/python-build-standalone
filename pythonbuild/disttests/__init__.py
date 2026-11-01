@@ -72,6 +72,37 @@ class TestPythonInterpreter(unittest.TestCase):
                     (install_dir / f"pythonw{major}.{minor}t.exe").is_file()
                 )
 
+    @unittest.skipUnless(sys.platform == "linux", "Linux perf support")
+    def test_perf_trampoline(self):
+        import sysconfig
+
+        if not sysconfig.get_config_var("PY_HAVE_PERF_TRAMPOLINE"):
+            self.skipTest("perf trampolines are not supported")
+
+        modes = ["perf"]
+        if sys.version_info >= (3, 13):
+            modes.append("perf_jit")
+
+        with tempfile.TemporaryDirectory(prefix="disttests-perf-") as temp_dir:
+            for mode in modes:
+                with self.subTest(mode=mode):
+                    result = subprocess.run(
+                        [
+                            sys.executable,
+                            "-I",
+                            "-X",
+                            mode,
+                            "-c",
+                            "import sys; assert sys.is_stack_trampoline_active()",
+                        ],
+                        cwd=temp_dir,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT,
+                        text=True,
+                        timeout=10,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stdout)
+
     def test_compression(self):
         import bz2
         import lzma
@@ -325,6 +356,41 @@ class TestPythonInterpreter(unittest.TestCase):
         self.assertEqual(
             interpreter.eval("zlib decompress [zlib compress test]"), "test"
         )
+
+    @unittest.skipIf(
+        os.name == "nt" and "static" in os.environ["BUILD_OPTIONS"],
+        "Tcl/Tk is unavailable in Windows static builds",
+    )
+    def test_tcl_thread_dispatch(self):
+        # Tcl calls from another thread must wait for the interpreter's main loop.
+        # Use a subprocess so a broken dispatcher cannot crash or hang the suite.
+        probe = """
+import threading
+import tkinter
+
+interpreter = tkinter.Tcl()
+errors = []
+
+def worker():
+    try:
+        interpreter.call("set", "thread_dispatch_probe", "value")
+    except RuntimeError as exc:
+        errors.append(str(exc))
+
+thread = threading.Thread(target=worker, daemon=True)
+thread.start()
+thread.join(5)
+assert not thread.is_alive(), "Tcl call did not finish"
+assert errors == ["main thread is not in main loop"], errors
+"""
+        result = subprocess.run(
+            [sys.executable, "-c", probe],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout)
 
     @unittest.skipIf("TCL_LIBRARY" not in os.environ, "TCL_LIBRARY not set")
     @unittest.skipIf("DISPLAY" not in os.environ, "DISPLAY not set")

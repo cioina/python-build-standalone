@@ -41,11 +41,6 @@ const RECOGNIZED_TRIPLES: &[&str] = &[
     "armv7-unknown-linux-gnueabihf",
     "i686-pc-windows-msvc",
     "i686-unknown-linux-gnu",
-    // Note there's build support for mips* targets but they are not tested
-    // See https://github.com/astral-sh/python-build-standalone/issues/412
-    "mips-unknown-linux-gnu",
-    "mipsel-unknown-linux-gnu",
-    "mips64el-unknown-linux-gnuabi64",
     "ppc64le-unknown-linux-gnu",
     "riscv64-unknown-linux-gnu",
     "s390x-unknown-linux-gnu",
@@ -151,6 +146,10 @@ const PE_ALLOWED_LIBRARIES: &[&str] = &[
     "python315_d.dll",
     "python315t.dll",
     "python315t_d.dll",
+    "python316.dll",
+    "python316_d.dll",
+    "python316t.dll",
+    "python316t_d.dll",
     "sqlite3.dll",
     "sqlite3_d.dll",
     "tcl86t.dll",
@@ -200,18 +199,6 @@ static GLIBC_MAX_VERSION_BY_TRIPLE: Lazy<HashMap<&'static str, version_compare::
         versions.insert(
             "i686-unknown-linux-gnu",
             version_compare::Version::from("2.17").unwrap(),
-        );
-        versions.insert(
-            "mips-unknown-linux-gnu",
-            version_compare::Version::from("2.19").unwrap(),
-        );
-        versions.insert(
-            "mipsel-unknown-linux-gnu",
-            version_compare::Version::from("2.19").unwrap(),
-        );
-        versions.insert(
-            "mips64el-unknown-linux-gnuabi64",
-            version_compare::Version::from("2.19").unwrap(),
         );
         versions.insert(
             "ppc64le-unknown-linux-gnu",
@@ -267,6 +254,27 @@ static GLIBC_MAX_VERSION_BY_TRIPLE: Lazy<HashMap<&'static str, version_compare::
         versions
     });
 
+static GCC_MAX_VERSION_BY_TRIPLE: Lazy<HashMap<&'static str, version_compare::Version<'static>>> =
+    Lazy::new(|| {
+        // Runtime ABI ceilings for the manylinux2014 targets, as recorded by
+        // https://github.com/pypa/auditwheel/blob/main/src/auditwheel/policy/manylinux-policy.json
+        // RISC-V uses the GCC 8 runtime from the Buster sysroot, whose newest
+        // symbol version is `GCC_7.0.0`.
+        [
+            ("aarch64-unknown-linux-gnu", "4.7.0"),
+            ("armv7-unknown-linux-gnueabi", "4.7.0"),
+            ("armv7-unknown-linux-gnueabihf", "4.7.0"),
+            ("riscv64-unknown-linux-gnu", "7.0.0"),
+            ("x86_64-unknown-linux-gnu", "4.8.0"),
+            ("x86_64_v2-unknown-linux-gnu", "4.8.0"),
+            ("x86_64_v3-unknown-linux-gnu", "4.8.0"),
+            ("x86_64_v4-unknown-linux-gnu", "4.8.0"),
+        ]
+        .into_iter()
+        .map(|(triple, version)| (triple, version_compare::Version::from(version).unwrap()))
+        .collect()
+    });
+
 static ELF_ALLOWED_LIBRARIES_BY_TRIPLE: Lazy<HashMap<&'static str, Vec<&'static str>>> =
     Lazy::new(|| {
         [
@@ -283,16 +291,14 @@ static ELF_ALLOWED_LIBRARIES_BY_TRIPLE: Lazy<HashMap<&'static str, Vec<&'static 
                 vec!["ld-linux-aarch64.so.1", "libgcc_s.so.1"],
             ),
             ("i686-unknown-linux-gnu", vec!["ld-linux-x86-64.so.2"]),
-            ("mips-unknown-linux-gnu", vec!["ld.so.1", "libatomic.so.1"]),
-            (
-                "mipsel-unknown-linux-gnu",
-                vec!["ld.so.1", "libatomic.so.1"],
-            ),
-            ("mips64el-unknown-linux-gnuabi64", vec![]),
             ("ppc64le-unknown-linux-gnu", vec!["ld64.so.1", "ld64.so.2"]),
             (
                 "riscv64-unknown-linux-gnu",
-                vec!["ld-linux-riscv64-lp64d.so.1", "libatomic.so.1"],
+                vec![
+                    "ld-linux-riscv64-lp64d.so.1",
+                    "libatomic.so.1",
+                    "libgcc_s.so.1",
+                ],
             ),
             ("s390x-unknown-linux-gnu", vec!["ld64.so.1"]),
             (
@@ -429,6 +435,26 @@ static DARWIN_ALLOWED_DYLIBS: Lazy<Vec<MachOAllowedDylib>> = Lazy::new(|| {
                 required: false,
             },
             MachOAllowedDylib {
+                name: "@rpath/libpython3.16.dylib".to_string(),
+                max_compatibility_version: "3.16.0".try_into().unwrap(),
+                required: false,
+            },
+            MachOAllowedDylib {
+                name: "@rpath/libpython3.16d.dylib".to_string(),
+                max_compatibility_version: "3.16.0".try_into().unwrap(),
+                required: false,
+            },
+            MachOAllowedDylib {
+                name: "@rpath/libpython3.16t.dylib".to_string(),
+                max_compatibility_version: "3.16.0".try_into().unwrap(),
+                required: false,
+            },
+            MachOAllowedDylib {
+                name: "@rpath/libpython3.16td.dylib".to_string(),
+                max_compatibility_version: "3.16.0".try_into().unwrap(),
+                required: false,
+            },
+            MachOAllowedDylib {
                 name: "/System/Library/Frameworks/AppKit.framework/Versions/C/AppKit".to_string(),
                 max_compatibility_version: "45.0.0".try_into().unwrap(),
                 required: true,
@@ -506,6 +532,11 @@ static DARWIN_ALLOWED_DYLIBS: Lazy<Vec<MachOAllowedDylib>> = Lazy::new(|| {
                 required: true,
             },
             MachOAllowedDylib {
+                name: "/usr/lib/libiconv.2.dylib".to_string(),
+                max_compatibility_version: "7.0.0".try_into().unwrap(),
+                required: false,
+            },
+            MachOAllowedDylib {
                 name: "/usr/lib/libncurses.5.4.dylib".to_string(),
                 max_compatibility_version: "5.4.0".try_into().unwrap(),
                 required: true,
@@ -567,9 +598,6 @@ static PLATFORM_TAG_BY_TRIPLE: Lazy<HashMap<&'static str, &'static str>> = Lazy:
         ("armv7-unknown-linux-gnueabihf", "linux-arm"),
         ("i686-pc-windows-msvc", "win32"),
         ("i686-unknown-linux-gnu", "linux-i686"),
-        ("mips-unknown-linux-gnu", "linux-mips"),
-        ("mipsel-unknown-linux-gnu", "linux-mipsel"),
-        ("mips64el-unknown-linux-gnuabi64", "todo"),
         ("ppc64le-unknown-linux-gnu", "linux-powerpc64le"),
         ("riscv64-unknown-linux-gnu", "linux-riscv64"),
         ("s390x-unknown-linux-gnu", "linux-s390x"),
@@ -936,6 +964,33 @@ impl ValidationContext {
     }
 }
 
+fn validate_elf_symbol_version(
+    target_triple: &str,
+    path: &Path,
+    name: &str,
+    version: &str,
+) -> Option<String> {
+    let (namespace, version) = version.split_once('_')?;
+    let (library, max_version) = match namespace {
+        "GLIBC" => (
+            "glibc",
+            GLIBC_MAX_VERSION_BY_TRIPLE
+                .get(target_triple)
+                .expect("max glibc version not defined for target triple"),
+        ),
+        "GCC" => ("libgcc", GCC_MAX_VERSION_BY_TRIPLE.get(target_triple)?),
+        _ => return None,
+    };
+    let version = version_compare::Version::from(version).expect("unable to parse version");
+
+    (&version > max_version).then(|| {
+        format!(
+            "{} references too new {library} symbol {name:?} ({version} > {max_version})",
+            path.display(),
+        )
+    })
+}
+
 fn validate_elf<Elf: FileHeader<Endian = Endianness>>(
     context: &mut ValidationContext,
     json: &PythonJsonMain,
@@ -979,9 +1034,6 @@ fn validate_elf<Elf: FileHeader<Endian = Endianness>>(
         "armv7-unknown-linux-gnueabi" => object::elf::EM_ARM,
         "armv7-unknown-linux-gnueabihf" => object::elf::EM_ARM,
         "i686-unknown-linux-gnu" => object::elf::EM_386,
-        "mips-unknown-linux-gnu" => object::elf::EM_MIPS,
-        "mipsel-unknown-linux-gnu" => object::elf::EM_MIPS,
-        "mips64el-unknown-linux-gnuabi64" => 0,
         "ppc64le-unknown-linux-gnu" => object::elf::EM_PPC64,
         "riscv64-unknown-linux-gnu" => object::elf::EM_RISCV,
         "s390x-unknown-linux-gnu" => object::elf::EM_S390,
@@ -1053,10 +1105,6 @@ fn validate_elf<Elf: FileHeader<Endian = Endianness>>(
             }
         }
     }
-
-    let wanted_glibc_max_version = GLIBC_MAX_VERSION_BY_TRIPLE
-        .get(target_triple)
-        .expect("max glibc version not defined for target triple");
 
     let sections = elf.sections(endian, data)?;
 
@@ -1193,21 +1241,10 @@ fn validate_elf<Elf: FileHeader<Endian = Endianness>>(
                     }
 
                     if let Some(version) = version_version {
-                        let parts: Vec<&str> = version.splitn(2, '_').collect();
-
-                        if parts.len() == 2 && parts[0] == "GLIBC" {
-                            let v = version_compare::Version::from(parts[1])
-                                .expect("unable to parse version");
-
-                            if &v > wanted_glibc_max_version {
-                                context.errors.push(format!(
-                                    "{} references too new glibc symbol {:?} ({} > {})",
-                                    path.display(),
-                                    name,
-                                    v,
-                                    wanted_glibc_max_version,
-                                ));
-                            }
+                        if let Some(error) =
+                            validate_elf_symbol_version(target_triple, path, &name, &version)
+                        {
+                            context.errors.push(error);
                         }
                     }
                 }
@@ -1647,7 +1684,7 @@ fn validate_pe<'data, Pe: ImageNtHeaders>(
                         continue;
                     }
                 }
-                "3.15" => {
+                "3.15" | "3.16" => {
                     if PE_ALLOWED_LIBRARIES_315.contains(&lib.as_str()) {
                         continue;
                     }
@@ -1804,7 +1841,7 @@ fn validate_extension_modules(
         "3.14" => {
             wanted.extend(GLOBAL_EXTENSIONS_PYTHON_3_14);
         }
-        "3.15" => {
+        "3.15" | "3.16" => {
             wanted.extend(GLOBAL_EXTENSIONS_PYTHON_3_15);
         }
         _ => {
@@ -1829,7 +1866,7 @@ fn validate_extension_modules(
             wanted.extend(GLOBAL_EXTENSIONS_WINDOWS_PRE_3_13);
         }
 
-        if matches!(python_major_minor, "3.14" | "3.15") {
+        if matches!(python_major_minor, "3.14" | "3.15" | "3.16") {
             wanted.extend(GLOBAL_EXTENSIONS_WINDOWS_3_14);
         }
 
@@ -1877,7 +1914,12 @@ fn validate_extension_modules(
         wanted.insert("_testexternalinspection");
     }
 
-    if (is_linux || is_macos) && matches!(python_major_minor, "3.12" | "3.13" | "3.14" | "3.15") {
+    if (is_linux || is_macos)
+        && matches!(
+            python_major_minor,
+            "3.12" | "3.13" | "3.14" | "3.15" | "3.16"
+        )
+    {
         wanted.insert("_testsinglephase");
     }
 
@@ -1995,6 +2037,7 @@ fn validate_distribution(
     let mut context = ValidationContext::default();
 
     let mut seen_paths = BTreeSet::new();
+    let mut seen_files = BTreeSet::new();
     let mut seen_symlink_targets = BTreeSet::new();
 
     let dist_filename = dist_path
@@ -2024,6 +2067,8 @@ fn validate_distribution(
         "3.14"
     } else if dist_filename.starts_with("cpython-3.15.") {
         "3.15"
+    } else if dist_filename.starts_with("cpython-3.16.") {
+        "3.16"
     } else {
         return Err(anyhow!("could not parse Python version from filename"));
     };
@@ -2079,6 +2124,10 @@ fn validate_distribution(
         }
 
         seen_paths.insert(path.clone());
+        let entry_type = entry.header().entry_type();
+        if entry_type.is_file() || entry_type.is_symlink() || entry_type.is_hard_link() {
+            seen_files.insert(path.clone());
+        }
 
         if let Some(link_name) = entry.link_name()? {
             let target = path.parent().unwrap().join(link_name).normalize();
@@ -2255,9 +2304,30 @@ fn validate_distribution(
         }
     }
 
+    // Ensure license paths in PYTHON.json refer to files in the archive.
+    let check_license_path = |context: &mut ValidationContext, owner: &str, path: &str| {
+        if !seen_files.contains(&Path::new("python").join(path)) {
+            context
+                .errors
+                .push(format!("{owner} references missing license file: {path}"));
+        }
+    };
+
+    if let Some(path) = &json.as_ref().unwrap().license_path {
+        check_license_path(&mut context, "PYTHON.json", path);
+    }
+
     // Validate extension module metadata.
     for (name, variants) in json.as_ref().unwrap().build_info.extensions.iter() {
         for ext in variants {
+            for path in ext.license_paths.iter().flatten() {
+                check_license_path(
+                    &mut context,
+                    &format!("extension {name} ({})", ext.variant),
+                    path,
+                );
+            }
+
             if let Some(shared) = &ext.shared_lib {
                 if !seen_paths.contains(&PathBuf::from("python").join(shared)) {
                     context.errors.push(format!(
@@ -2395,5 +2465,79 @@ pub fn command_validate_distribution(args: &ArgMatches) -> Result<()> {
         Ok(())
     } else {
         Err(anyhow!("errors found"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn symbol_error(target: &str, symbol: &str, version: &str) -> Option<String> {
+        validate_elf_symbol_version(
+            target,
+            Path::new("python/install/lib/libpython3.16.so.1.0"),
+            symbol,
+            version,
+        )
+    }
+
+    #[test]
+    fn libgcc_symbols_respect_target_runtime_limits() {
+        for (target, allowed, rejected) in [
+            ("aarch64-unknown-linux-gnu", "GCC_4.7.0", "GCC_4.8.0"),
+            ("armv7-unknown-linux-gnueabi", "GCC_4.7.0", "GCC_4.8.0"),
+            ("armv7-unknown-linux-gnueabihf", "GCC_4.7.0", "GCC_4.8.0"),
+            ("x86_64-unknown-linux-gnu", "GCC_4.8.0", "GCC_7.0.0"),
+            ("x86_64_v2-unknown-linux-gnu", "GCC_4.8.0", "GCC_7.0.0"),
+            ("x86_64_v3-unknown-linux-gnu", "GCC_4.8.0", "GCC_7.0.0"),
+            ("x86_64_v4-unknown-linux-gnu", "GCC_4.8.0", "GCC_7.0.0"),
+            ("riscv64-unknown-linux-gnu", "GCC_7.0.0", "GCC_11.0"),
+        ] {
+            assert!(symbol_error(target, "runtime_symbol", "GCC_3.0").is_none());
+            assert!(symbol_error(target, "runtime_symbol", allowed).is_none());
+            assert!(symbol_error(target, "runtime_symbol", rejected).is_some());
+        }
+    }
+
+    #[test]
+    fn rejects_native_half_float_runtime_symbols() {
+        for symbol in ["__extendhfsf2", "__extendhfxf2", "__truncdfhf2"] {
+            assert_eq!(
+                symbol_error("x86_64-unknown-linux-gnu", symbol, "GCC_12.0.0").unwrap(),
+                format!(
+                    "python/install/lib/libpython3.16.so.1.0 references too new libgcc symbol \
+                     {symbol:?} (12.0.0 > 4.8.0)"
+                )
+            );
+        }
+        assert_eq!(
+            symbol_error("aarch64-unknown-linux-gnu", "__extendhftf2", "GCC_11.0").unwrap(),
+            "python/install/lib/libpython3.16.so.1.0 references too new libgcc symbol \
+             \"__extendhftf2\" (11.0 > 4.7.0)"
+        );
+    }
+
+    #[test]
+    fn glibc_symbols_respect_target_runtime_limits() {
+        assert!(symbol_error("x86_64-unknown-linux-gnu", "runtime_symbol", "GLIBC_2.17").is_none());
+        assert!(symbol_error("x86_64-unknown-linux-gnu", "runtime_symbol", "GLIBC_2.18").is_some());
+        assert!(
+            symbol_error("riscv64-unknown-linux-gnu", "runtime_symbol", "GLIBC_2.28").is_none()
+        );
+        assert!(
+            symbol_error("riscv64-unknown-linux-gnu", "runtime_symbol", "GLIBC_2.29").is_some()
+        );
+        assert!(
+            symbol_error("x86_64-unknown-linux-musl", "runtime_symbol", "GLIBC_2.2.5").is_some()
+        );
+    }
+
+    #[test]
+    fn every_target_allowing_libgcc_has_a_runtime_limit() {
+        for (target, libraries) in ELF_ALLOWED_LIBRARIES_BY_TRIPLE.iter() {
+            if libraries.contains(&"libgcc_s.so.1") {
+                assert!(GCC_MAX_VERSION_BY_TRIPLE.contains_key(target), "{target}");
+            }
+        }
     }
 }

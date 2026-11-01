@@ -66,7 +66,7 @@ jobs:
           persist-credentials: false
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: false
 
@@ -138,7 +138,7 @@ jobs:
         run: ./scripts/install-cygwin.ps1 -Packages autoconf,automake,libtool
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
         with:
           enable-cache: false
 
@@ -154,13 +154,14 @@ jobs:
 
       - name: Build
         if: ${{ ! matrix.dry-run }}
-        shell: cmd
+        shell: pwsh
         run: |
-          uv run --no-dev build.py --target-triple %MATRIX_TARGET_TRIPLE% --python cpython-%MATRIX_PYTHON% --sh c:\cygwin\bin\sh.exe --options %MATRIX_BUILD_OPTIONS% --vs %MATRIX_VS_VERSION% --platform-toolset %MATRIX_PLATFORM_TOOLSET% --vc-tools-version %MATRIX_VC_TOOLS_VERSION%
+          uv run --no-dev build.py --target-triple "$env:MATRIX_TARGET_TRIPLE" --python "cpython-$env:MATRIX_PYTHON" --sh c:\cygwin\bin\sh.exe --options "$env:MATRIX_BUILD_OPTIONS" --vs "$env:MATRIX_VS_VERSION" --platform-toolset "$env:MATRIX_PLATFORM_TOOLSET" --vc-tools-version "$env:MATRIX_VC_TOOLS_VERSION" --compression "$env:ARCHIVE_COMPRESSION"
         env:
           MATRIX_TARGET_TRIPLE: ${{ matrix.target_triple }}
           MATRIX_PYTHON: ${{ matrix.python }}
           MATRIX_BUILD_OPTIONS: ${{ matrix.build_options }}
+          ARCHIVE_COMPRESSION: ${{ github.event_name == 'pull_request' && 'fast' || 'small' }}
           MATRIX_VS_VERSION: ${{ matrix.vs_version }}
           MATRIX_PLATFORM_TOOLSET: ${{ matrix.platform_toolset }}
           MATRIX_VC_TOOLS_VERSION: ${{ matrix.vc_tools_version }}

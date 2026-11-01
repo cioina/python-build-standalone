@@ -22,15 +22,24 @@ permissions: {}
 
 jobs:
   release-gate:
-    name: Release gate
+    name: release-gate
     runs-on: ubuntu-latest
-    environment: release
+    environment: release-gate
     steps:
       - run: echo "Release approved"
 
+  # Tags require a successful release deployment before the release job creates them.
+  release-deployment:
+    name: Record release deployment
+    needs: release-gate
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - run: echo "Release deployment approved"
+
   release:
     name: Release
-    needs: release-gate
+    needs: release-deployment
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     runs-on: depot-ubuntu-24.04-8
@@ -54,7 +63,7 @@ jobs:
           repo: casey/just
           version: 1.42.4
 
-      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
 
       # Perform a release in dry-run mode.
       - run: just release-dry-run ${GH_TOKEN} ${GITHUB_EVENT_INPUTS_SHA} ${GITHUB_EVENT_INPUTS_TAG}
@@ -135,7 +144,7 @@ jobs:
       - name: Get versions token
         id: token
         if: ${{ github.event.inputs.dry-run == 'false' }}
-        uses: open-security-tools/ost-simple-sts@88f85462c7e9c9e2fb2745bd5ce4ee163aec0420 # v0.0.5
+        uses: astral-sh/github-actions/simple-token-service@eb81cf4d13127c3f9539f621c17e4c65327636c8
         with:
           exchange-url: ${{ secrets.RELEASES_STS_API_URL }}/exchange
           audience: ${{ secrets.RELEASES_STS_API_URL }}
@@ -201,3 +210,13 @@ jobs:
           sleep 10
           # Use admin to bypass required review
           gh pr merge --squash --admin "$BRANCH_NAME"
+
+  publish-docs:
+    needs: release
+    if: ${{ github.event.inputs.dry-run == 'false' }}
+    uses: $/.github/workflows/publish-docs.yml
+    permissions:
+      contents: read
+      id-token: write
+    with:
+      ref: ${{ inputs.sha }}

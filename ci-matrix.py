@@ -4,6 +4,10 @@
 #     "packaging",
 #     "pyyaml",
 # ]
+#
+# [tool.uv]
+# require-build-hashes = true
+# preview-features = ["build-dependency-hashes"]
 # ///
 
 import argparse
@@ -27,7 +31,6 @@ DOCKER_BUILD_IMAGES = [
     {"name": "build.cross", "arch": "x86_64"},
     {"name": "build.cross-riscv64", "arch": "x86_64"},
     {"name": "build.debian13", "arch": "aarch64"},
-    {"name": "gcc", "arch": "x86_64"},
     {"name": "gcc.debian13-x86_64", "arch": "x86_64"},
     {"name": "gcc.debian13", "arch": "aarch64"},
 ]
@@ -614,7 +617,9 @@ def main() -> None:
     if args.matrix_type in ["python-build", "all"]:
         if args.max_shards:
             python_build_matrix = {}
-            shards = (len(python_entries) // CI_MATRIX_SIZE_LIMIT) + 1
+            shards = (
+                len(python_entries) + CI_MATRIX_SIZE_LIMIT - 1
+            ) // CI_MATRIX_SIZE_LIMIT
             if shards > args.max_shards:
                 print(
                     f"error: python-build matrix of size {len(python_entries)} requires {shards} shards, but the maximum is {args.max_shards}; consider increasing `--max-shards`",

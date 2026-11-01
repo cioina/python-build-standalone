@@ -7,6 +7,10 @@
 # dependencies = [
 #     "packaging>=24",
 # ]
+#
+# [tool.uv]
+# require-build-hashes = true
+# preview-features = ["build-dependency-hashes"]
 # ///
 
 """Find and optionally apply updates to pythonbuild/downloads.json.
@@ -302,18 +306,17 @@ def xorg_policy(category: str, name: str, extension: str = "tar.gz") -> Policy:
 
 POLICIES: dict[str, Policy] = {
     "autoconf": gnu_policy("autoconf", "tar.gz"),
-    "binutils": gnu_policy("binutils", "tar.xz"),
     "bzip2": html_policy(
         "https://sourceware.org/pub/bzip2/",
         r"(?:^|/)bzip2-(?P<version>[0-9][0-9A-Za-z.+-]*)\.tar\.gz$",
         mirrored=True,
     ),
-    "cpython-3.10": cpython_policy("3.10"),
     "cpython-3.11": cpython_policy("3.11"),
     "cpython-3.12": cpython_policy("3.12"),
     "cpython-3.13": cpython_policy("3.13"),
     "cpython-3.14": cpython_policy("3.14"),
     "cpython-3.15": cpython_policy("3.15", allow_prereleases=True),
+    "cpython-3.16": cpython_policy("3.16", allow_prereleases=True),
     "expat": github_policy(
         "libexpat/libexpat",
         r"R_(?P<version>[0-9_]+)",
@@ -329,7 +332,6 @@ POLICIES: dict[str, Policy] = {
         "libffi/libffi",
         r"v(?P<version>[0-9.]+)",
         artifact_name="libffi-{version}.tar.gz",
-        series=2,
     ),
     "libpthread-stubs": xorg_policy("lib", "libpthread-stubs"),
     "libX11": xorg_policy("lib", "libX11"),
@@ -348,6 +350,10 @@ POLICIES: dict[str, Policy] = {
         ),
         mirrored=True,
         version_transform=lambda value: value.replace("-", "."),
+    ),
+    "musl-static": html_policy(
+        "https://musl.libc.org/",
+        r"(?:^|/)musl-(?P<version>[0-9]+\.[0-9]+\.[0-9]+)\.tar\.gz$",
     ),
     "ncurses": gnu_policy("ncurses", "tar.gz"),
     "openssl-3.5": github_policy(
@@ -417,10 +423,7 @@ UNSUPPORTED: dict[str, str] = {
     "llvm-aarch64-linux": "toolchain bootstrap requires coordinated updates",
     "llvm-x86_64-linux": "toolchain bootstrap requires coordinated updates",
     "llvm-aarch64-macos": "toolchain bootstrap requires coordinated updates",
-    "llvm-x86_64-macos": "toolchain bootstrap requires coordinated updates",
     "musl": "intentionally pinned build toolchain",
-    "musl-static": "intentionally pinned build toolchain",
-    "openssl-1.1": "end-of-life release series",
     "sqlite": "requires SQLite's numeric-version and release-year mapping",
     "strawberryperl": "Windows toolchain update requires manual validation",
     "tix": "source dependency snapshot",

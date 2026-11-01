@@ -6,7 +6,7 @@ BUILD := $(HERE)/build.py
 NULL :=
 SPACE := $(subst ,, )
 
-ALL_PYTHON_VERSIONS := 3.10 3.11 3.12 3.13 3.14 3.15
+ALL_PYTHON_VERSIONS := 3.11 3.12 3.13 3.14 3.15 3.16
 
 ifndef PYBUILD_TARGET_TRIPLE
     $(error PYBUILD_TARGET_TRIPLE not defined)
@@ -56,15 +56,13 @@ include $(OUTDIR)/versions/VERSION.*
 # Always write out expanded Dockerfiles.
 $(shell $(RUN_BUILD) placeholder_archive dockerfiles)
 
-# Host executables are shared only by builds using the same producer image.
+# Host interpreters are shared only by builds using the same producer image.
 # Native, non-Docker builds must not reuse executables from a container.
-BINUTILS_SUFFIX := $(HOST_PLATFORM)-$(if $(PYBUILD_NO_DOCKER),local,$(DOCKER_IMAGE_GCC))
 HOST_PYTHON_SUFFIX := $(HOST_PLATFORM)-$(if $(PYBUILD_NO_DOCKER),local,$(DOCKER_IMAGE_BUILD))
 
 BASE_TOOLCHAIN_DEPENDS := \
-    $(if $(NEED_BINUTILS),$(OUTDIR)/binutils-$(BINUTILS_VERSION)-$(BINUTILS_SUFFIX).tar) \
     $(OUTDIR)/$(CLANG_FILENAME) \
-    $(NULL)
+    $(if $(filter linux_%,$(HOST_PLATFORM)),$(HERE)/setup-llvm-aliases.sh)
 
 TOOLCHAIN_DEPENDS := \
     $(BASE_TOOLCHAIN_DEPENDS) \
@@ -82,17 +80,16 @@ HOST_PYTHON_DEPENDS := $(OUTDIR)/cpython-$(PYTHON_MAJOR_VERSION)-$(CPYTHON_$(PYT
 default: $(OUTDIR)/cpython-$(CPYTHON_$(PYTHON_MAJOR_VERSION)_VERSION)-$(PACKAGE_SUFFIX).tar
 
 ifndef PYBUILD_NO_DOCKER
-$(OUTDIR)/image-%.$(HOST_PLATFORM).tar: $(OUTDIR)/%.Dockerfile
+$(OUTDIR)/image-%.$(HOST_PLATFORM).tar: $(OUTDIR)/%.Dockerfile $(HERE)/%.Dockerfile
 	$(RUN_BUILD) --toolchain image-$*
 endif
-
-$(OUTDIR)/binutils-$(BINUTILS_VERSION)-$(BINUTILS_SUFFIX).tar: $(if $(PYBUILD_NO_DOCKER),,$(OUTDIR)/image-$(DOCKER_IMAGE_GCC).$(HOST_PLATFORM).tar) $(HERE)/build-binutils.sh
-	$(RUN_BUILD) --toolchain --docker-image $(DOCKER_IMAGE_GCC) binutils
 
 $(OUTDIR)/$(CLANG_FILENAME):
 	$(RUN_BUILD) --toolchain clang --target-triple $(TARGET_TRIPLE)
 
-$(OUTDIR)/$(MUSL_TOOLCHAIN_NAME)-$(MUSL_TOOLCHAIN_VERSION)-$(HOST_PLATFORM).tar: $(BASE_TOOLCHAIN_DEPENDS) $(HERE)/build-musl.sh
+$(OUTDIR)/$(MUSL_TOOLCHAIN_NAME)-$(MUSL_TOOLCHAIN_VERSION)-$(HOST_PLATFORM).tar: $(BASE_TOOLCHAIN_DEPENDS) \
+    $(HERE)/build-musl.sh $(wildcard $(HERE)/patch-musl-CVE-*.patch) \
+    $(if $(PYBUILD_NO_DOCKER),,$(OUTDIR)/image-$(DOCKER_IMAGE_GCC).$(HOST_PLATFORM).tar)
 	$(RUN_BUILD) --toolchain musl --docker-image $(DOCKER_IMAGE_GCC)
 
 ifeq ($(HOST_PLATFORM),linux_x86_64)
@@ -105,7 +102,7 @@ empty:
 
 toolchain: $(TOOLCHAIN_TARGET)
 
-toolchain-image-%: $(OUTDIR)/%.Dockerfile
+toolchain-image-%: $(OUTDIR)/%.Dockerfile $(HERE)/%.Dockerfile
 	$(RUN_BUILD) --toolchain image-$*
 
 AUTOCONF_DEPENDS = \
@@ -180,6 +177,8 @@ $(OUTDIR)/openssl-3.5-$(OPENSSL_3.5_VERSION)-$(PACKAGE_SUFFIX).tar: $(PYTHON_DEP
 
 LIBEDIT_DEPENDS = \
     $(PYTHON_DEP_DEPENDS) \
+    $(OUTDIR)/autoconf-$(AUTOCONF_VERSION)-$(PACKAGE_SUFFIX).tar \
+    $(OUTDIR)/m4-$(M4_VERSION)-$(PACKAGE_SUFFIX).tar \
     $(OUTDIR)/ncurses-$(NCURSES_VERSION)-$(PACKAGE_SUFFIX).tar \
     $(HERE)/build-libedit.sh \
     $(NULL)
@@ -268,7 +267,6 @@ PYTHON_DEPENDS_$(1) := \
     $$(if $$(NEED_m4),$$(OUTDIR)/m4-$$(M4_VERSION)-$$(PACKAGE_SUFFIX).tar) \
     $$(if $$(NEED_MPDECIMAL),$$(OUTDIR)/mpdecimal-$$(MPDECIMAL_VERSION)-$$(PACKAGE_SUFFIX).tar) \
     $$(if $$(NEED_NCURSES),$$(OUTDIR)/ncurses-$$(NCURSES_VERSION)-$$(PACKAGE_SUFFIX).tar) \
-    $$(if $$(NEED_OPENSSL_1_1),$$(OUTDIR)/openssl-1.1-$$(OPENSSL_1.1_VERSION)-$$(PACKAGE_SUFFIX).tar) \
     $$(if $$(NEED_OPENSSL_3_5),$$(OUTDIR)/openssl-3.5-$$(OPENSSL_3.5_VERSION)-$$(PACKAGE_SUFFIX).tar) \
     $$(if $$(NEED_PATCHELF),$$(OUTDIR)/patchelf-$$(PATCHELF_VERSION)-$$(PACKAGE_SUFFIX).tar) \
     $$(if $$(NEED_PKGCONF),$$(OUTDIR)/pkgconf-$$(PKGCONF_VERSION)-$$(PACKAGE_SUFFIX).tar) \

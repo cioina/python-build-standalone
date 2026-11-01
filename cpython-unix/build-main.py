@@ -55,12 +55,12 @@ def main():
     parser.add_argument(
         "--python",
         choices={
-            "cpython-3.10",
             "cpython-3.11",
             "cpython-3.12",
             "cpython-3.13",
             "cpython-3.14",
             "cpython-3.15",
+            "cpython-3.16",
         },
         default="cpython-3.11",
         help="Python distribution to build",
@@ -92,13 +92,11 @@ def main():
             "default",
             "empty",
             "toolchain",
-            "toolchain-image-build",
             "toolchain-image-build.cross",
             "toolchain-image-build.cross-riscv64",
             "toolchain-image-build.cross-loongarch64",
             "toolchain-image-build.debian13",
             "toolchain-image-build.debian13-x86_64",
-            "toolchain-image-gcc",
             "toolchain-image-gcc.debian13",
             "toolchain-image-gcc.debian13-x86_64",
             "toolchain-image-xcb",
@@ -107,6 +105,13 @@ def main():
         },
         default="default",
         help="The make target to evaluate",
+    )
+
+    parser.add_argument(
+        "--compression",
+        choices=("small", "fast"),
+        default="small",
+        help="Compression profile for the full distribution archive",
     )
 
     args = parser.parse_args()
@@ -221,7 +226,9 @@ def main():
     DIST.mkdir(exist_ok=True)
 
     if args.make_target == "default":
-        compress_python_archive(BUILD / build_basename, DIST, dist_basename)
+        compress_python_archive(
+            BUILD / build_basename, DIST, dist_basename, compression=args.compression
+        )
 
 
 if __name__ == "__main__":
